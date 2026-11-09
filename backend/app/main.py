@@ -142,6 +142,9 @@ def health() -> dict:
             "max_snippet_bytes": settings.max_snippet_bytes,
         },
     }
+    sample = PROJECT_ROOT / "fixtures" / "buggy-sample"
+    if not settings.public and sample.is_dir():
+        out["sample_path"] = str(sample)  # prefills the folder input locally; never sent by the demo
     if settings.public:
         out["limits"].update({
             "per_hour": settings.rate_limit_per_hour,

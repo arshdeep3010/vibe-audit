@@ -1441,11 +1441,15 @@ const COVERAGE = [
 // Deliberately buggy Express API (also in fixtures/snippets/express-api.js).
 const SAMPLE = "const express = require(\"express\");\nconst mysql = require(\"mysql\");\nconst { exec } = require(\"child_process\");\nconst jwt = require(\"jsonwebtoken\");\n\nconst app = express();\napp.use(express.json());\n\nconst JWT_SECRET = \"supersecret123\";\nconst STRIPE_KEY = \"sk_live_FAKE_EXAMPLE_KEY_0000\";\n\nconst db = mysql.createConnection({\n  host: \"localhost\",\n  user: \"root\",\n  password: \"admin123\",\n  database: \"shop\",\n});\n\n// Login\napp.post(\"/login\", (req, res) => {\n  const { username, password } = req.body;\n  const sql = `SELECT * FROM users WHERE username = '${username}' AND password = '${password}'`;\n  db.query(sql, (err, rows) => {\n    if (rows.length > 0) {\n      const token = jwt.sign({ id: rows[0].id, role: rows[0].role }, JWT_SECRET);\n      res.json({ token });\n    } else {\n      res.status(401).send(\"Invalid login\");\n    }\n  });\n});\n\nfunction auth(req, res, next) {\n  const token = req.headers.authorization;\n  const user = jwt.decode(token);\n  req.user = user;\n  next();\n}\n\n// Admin: delete any user\napp.delete(\"/users/:id\", auth, (req, res) => {\n  db.query(\"DELETE FROM users WHERE id = \" + req.params.id);\n  res.send(\"deleted\");\n});\n\n// Search products\napp.get(\"/search\", (req, res) => {\n  const q = req.query.q;\n  res.send(`<h1>Results for ${q}</h1>`);\n});\n\n// Export a report\napp.get(\"/export\", auth, (req, res) => {\n  exec(\"zip -r /tmp/report.zip \" + req.query.folder, (err, out) => {\n    res.download(\"/tmp/report.zip\");\n  });\n});\n\n// Checkout\napp.post(\"/checkout\", auth, async (req, res) => {\n  const items = req.body.items;\n  let total = 0;\n  items.forEach(async (item) => {\n    const price = await getPrice(item.id);\n    total += price * item.qty;\n  });\n  if (req.body.coupon == \"FREE\") total = 0;\n  res.json({ charged: total });\n});\n\nasync function getPrice(id) {\n  return new Promise((resolve) => {\n    db.query(\"SELECT price FROM products WHERE id = ?\", [id], (err, rows) => {\n      resolve(rows[0].price);\n    });\n  });\n}\n\n// Paginated orders\napp.get(\"/orders\", auth, (req, res) => {\n  const page = req.query.page;\n  const offset = page * 20;\n  db.query(`SELECT * FROM orders LIMIT 20 OFFSET ${offset}`, (err, rows) => {\n    res.json(rows);\n  });\n});\n\napp.listen(3000, () => console.log(\"running\"));\n";
 
+/* Best guess at the mode before /api/health answers (a cold Lambda can take a second or two),
+   so the hosted demo never flashes the local-only inputs. The health response has the final say. */
+const LOCAL_HOST = ['localhost', '127.0.0.1', '[::1]'].includes(location.hostname);
+
 function scanApp() {
   return {
-    cfg: { configured: true, model: '' },
-    view: 'input', tab: 'local',
-    form: { local: 'C:\\Users\\ashu3\\OneDrive\\Desktop\\JOB\\projects\\vibe-audit\\fixtures\\buggy-sample', github: '', paste: '', filename: 'snippet.js', depth: 'quick' },
+    cfg: { configured: true, model: '', mode: LOCAL_HOST ? 'local' : 'public' },
+    view: 'input', tab: LOCAL_HOST ? 'local' : 'paste',
+    form: { local: '', github: '', paste: '', filename: 'snippet.js', depth: 'quick' },
     pillars: [
       { t: 'Security', d: 'Leaked secrets, injection, broken auth, XSS and insecure defaults.', i: ICON.shield },
       { t: 'Logic & runtime', d: 'Null access, broken async, crashes and missing error handling.', i: ICON.bolt },
@@ -1475,6 +1479,7 @@ function scanApp() {
       this.resetSteps();
       await this.loadHealth();
       if (this.isPublic) { this.tab = 'paste'; this.form.depth = 'quick'; }
+      else if (!this.form.local && this.cfg.sample_path) this.form.local = this.cfg.sample_path;
       this.loadRecent();
       addEventListener('keydown', e => { if ((e.ctrlKey || e.metaKey) && e.key === 'Enter' && this.view === 'input') this.start(); });
       this.$watch('view', v => VA3D.setMode(v === 'running' ? 'scan' : v === 'done' ? 'done' : 'idle'));

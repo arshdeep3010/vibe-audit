@@ -83,6 +83,8 @@ def test_public_mode_refuses_folders_repos_and_deep(api):
     assert api.post("/api/scan", json={"kind": "github", "value": "https://github.com/a/b"}).status_code == 403
     assert paste(api, depth="deep").status_code == 403
     assert api.fake.calls == []
+    health = api.get("/api/health").json()
+    assert health["mode"] == "public" and "sample_path" not in health   # no server paths leak
 
 
 def test_rate_limit_returns_429_with_retry_after(api):
