@@ -1,0 +1,105 @@
+# Push to main → tests → build the Lambda package → terraform apply → upload the frontend
+# to S3 → invalidate CloudFront → smoke test.
+#
+# AWS access is short-lived: the job trades GitHub's OIDC token for the deploy role made by
+# infra/bootstrap. No AWS keys are stored in GitHub. Repository variables to set:
+#   AWS_REGION, AWS_DEPLOY_ROLE_ARN, TF_STATE_BUCKET   (from `terraform output` in infra/bootstrap)
+#   BUDGET_EMAIL                                         (optional: monthly cost alert)
+name: deploy
+
+on:
+  push:
+    branches: [main]
+  workflow_dispatch:
+
+concurrency:
+  group: deploy-production
+  cancel-in-progress: false # never interrupt a terraform apply
+
+permissions:
+  contents: read
+
+jobs:
+  checks:
+    uses: ./.github/workflows/ci.yml
+
+  deploy:
+    needs: checks
+    runs-on: ubuntu-latest
+    environment:
+      name: production
+      url: ${{ steps.tf.outputs.url }}
+    permissions:
+      contents: read
+      id-token: write # OIDC → AWS
+    env:
+      TF_IN_AUTOMATION: "1"
+      TF_VAR_region: ${{ vars.AWS_REGION }}
+      TF_VAR_budget_email: ${{ vars.BUDGET_EMAIL }}
+    steps:
+      - uses: actions/checkout@v5
+
+      - uses: actions/setup-python@v6
+        with:
+          python-version: "3.12"
+
+      - name: Build Lambda package
+        run: python infra/build_lambda.py --arch arm64 --python 3.12
+
+      - uses: aws-actions/configure-aws-credentials@v5
+        with:
+          role-to-assume: ${{ vars.AWS_DEPLOY_ROLE_ARN }}
+          aws-region: ${{ vars.AWS_REGION }}
+
+      - uses: hashicorp/setup-terraform@v3
+        with:
+          terraform_version: 1.17.1
+          terraform_wrapper: false
+
+      - name: terraform init
+        working-directory: infra/app
+        run: >
+          terraform init -input=false
+          -backend-config="bucket=${{ vars.TF_STATE_BUCKET }}"
+          -backend-config="key=vibe-audit/app.tfstate"
+          -backend-config="region=${{ vars.AWS_REGION }}"
+          -backend-config="use_lockfile=true"
+
+      - name: terraform plan
+        working-directory: infra/app
+        run: terraform plan -input=false -out=tfplan
+
+      - name: terraform apply
+        working-directory: infra/app
+        run: terraform apply -input=false tfplan
+
+      - name: Read outputs
+        id: tf
+        working-directory: infra/app
+        run: |
+          echo "url=$(terraform output -raw site_url)" >> "$GITHUB_OUTPUT"
+          echo "bucket=$(terraform output -raw site_bucket)" >> "$GITHUB_OUTPUT"
+          echo "distribution=$(terraform output -raw distribution_id)" >> "$GITHUB_OUTPUT"
+
+      - name: Upload frontend
+        run: >
+          aws s3 cp frontend/index.html "s3://${{ steps.tf.outputs.bucket }}/index.html"
+          --cache-control "no-cache" --content-type "text/html; charset=utf-8"
+
+      - name: Invalidate CDN
+        run: >
+          aws cloudfront create-invalidation
+          --distribution-id "${{ steps.tf.outputs.distribution }}" --paths "/*"
+          --query "Invalidation.Id" --output text
+
+      - name: Smoke test
+        env:
+          URL: ${{ steps.tf.outputs.url }}
+        run: |
+          curl -fsS --retry 6 --retry-delay 10 --retry-all-errors "$URL/api/health" | tee health.json
+          python -c "import json; h = json.load(open('health.json')); assert h['ok'] and h['mode'] == 'public' and h['progress'] == 'poll', h"
+          curl -fsS --retry 3 --retry-delay 10 --retry-all-errors -o /dev/null "$URL/how-it-works"
+          if ! python -c "import json, sys; sys.exit(0 if json.load(open('health.json'))['configured'] else 1)"; then
+            echo "::warning::The model API key isn't set yet. Create the SSM parameter (see README) and the site picks it up within a minute."
+          fi
+          echo "### Deployed: $URL" >> "$GITHUB_STEP_SUMMARY"

@@ -1,0 +1,603 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
+  <meta name="color-scheme" content="light dark" />
+  <meta name="theme-color" content="#f2f2f5" media="(prefers-color-scheme: light)" />
+  <meta name="theme-color" content="#0a0b0e" media="(prefers-color-scheme: dark)" />
+  <title>VibeAudit — find bugs in AI-coded apps</title>
+  <script defer src="https://cdnjs.cloudflare.com/ajax/libs/alpinejs/3.14.8/cdn.min.js"></script>
+  <style>
+    /* ============================ Design tokens ============================ */
+    :root {
+      color-scheme: light dark;
+
+      /* Neutrals — dark is the default */
+      --bg: #0a0b0e;
+      --surface: #16181e;        /* elevated card            */
+      --surface-2: #1c1f27;      /* nested control / input   */
+      --hairline: rgba(255,255,255,0.09);
+      --hairline-2: rgba(255,255,255,0.14);
+      --text: rgba(255,255,255,0.92);
+      --text-2: rgba(255,255,255,0.58);
+      --text-3: rgba(255,255,255,0.40);
+      --accent: #0a84ff;
+      --accent-weak: rgba(10,132,255,0.16);
+      --ok: #30d158;
+
+      /* Translucent chrome */
+      --glass: rgba(16,18,24,0.66);
+      --glass-edge: rgba(255,255,255,0.08);
+
+      /* Depth — bigger surfaces read thicker */
+      --shadow-1: 0 1px 2px rgba(0,0,0,0.45);
+      --shadow-2: 0 14px 40px -16px rgba(0,0,0,0.7), 0 2px 10px rgba(0,0,0,0.4);
+
+      /* Grade colors (theme-aware for legible colored text) */
+      --g-A: #30d158; --g-B: #9ee246; --g-C: #ffd60a; --g-D: #ff9f0a; --g-F: #ff453a; --g-x: #8e8e93;
+
+      /* Shape + type */
+      --r-lg: 20px; --r-md: 14px; --r-sm: 10px;
+      --font: system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
+      --mono: ui-monospace, "SF Mono", SFMono-Regular, Menlo, Consolas, monospace;
+
+      /* Motion — exact curves from the animate skill */
+      --ease-out: cubic-bezier(0.23, 1, 0.32, 1);
+      --ease-in-out: cubic-bezier(0.77, 0, 0.175, 1);
+      --ease-drawer: cubic-bezier(0.32, 0.72, 0, 1);
+      --d-press: 120ms;
+      --d-hover: 160ms;
+      --d-accordion: 240ms;
+      --d-view: 360ms;
+    }
+
+    @media (prefers-color-scheme: light) {
+      :root {
+        --bg: #f2f2f5;
+        --surface: #ffffff;
+        --surface-2: #f4f4f7;
+        --hairline: rgba(0,0,0,0.09);
+        --hairline-2: rgba(0,0,0,0.14);
+        --text: #1d1d1f;
+        --text-2: rgba(0,0,0,0.56);
+        --text-3: rgba(0,0,0,0.40);
+        --accent: #0071e3;
+        --accent-weak: rgba(0,113,227,0.12);
+        --glass: rgba(255,255,255,0.72);
+        --glass-edge: rgba(255,255,255,0.7);
+        --shadow-1: 0 1px 2px rgba(0,0,0,0.10);
+        --shadow-2: 0 14px 40px -18px rgba(0,0,0,0.22), 0 2px 8px rgba(0,0,0,0.08);
+        --g-A: #248a3d; --g-B: #5a8a0f; --g-C: #9a7b0a; --g-D: #b85c00; --g-F: #d70015; --g-x: #6e6e73;
+      }
+    }
+
+    /* ============================ Base ============================ */
+    * { box-sizing: border-box; }
+    [x-cloak] { display: none !important; }
+    html { -webkit-text-size-adjust: 100%; }
+    body {
+      margin: 0;
+      min-height: 100vh; min-height: 100dvh;
+      font-family: var(--font);
+      font-size: 15px; line-height: 1.5;
+      color: var(--text);
+      background: var(--bg);
+      -webkit-font-smoothing: antialiased;
+      -webkit-tap-highlight-color: transparent;
+      text-rendering: optimizeLegibility;
+    }
+    /* subtle depth glow, dark only */
+    body::before {
+      content: ""; position: fixed; inset: 0; z-index: -1; pointer-events: none;
+      background: radial-gradient(1100px 560px at 84% -12%, #16223f 0%, rgba(10,11,14,0) 58%);
+    }
+    @media (prefers-color-scheme: light) { body::before { background: none; } }
+
+    button, input, textarea { font: inherit; color: inherit; }
+    button { touch-action: manipulation; cursor: pointer; }
+    a { color: inherit; }
+    ::selection { background: var(--accent-weak); }
+
+    .app { min-height: 100vh; min-height: 100dvh; display: flex; flex-direction: column; }
+    .wrap { width: 100%; max-width: 940px; margin: 0 auto; padding: 28px 20px 64px;
+      padding-left: max(20px, env(safe-area-inset-left)); padding-right: max(20px, env(safe-area-inset-right)); }
+
+    /* ============================ App bar (translucent chrome) ============================ */
+    .appbar {
+      position: sticky; top: 0; z-index: 50;
+      display: flex; align-items: center; justify-content: space-between; gap: 16px;
+      padding: 11px max(20px, env(safe-area-inset-left)) 11px max(20px, env(safe-area-inset-right));
+      padding-top: max(11px, env(safe-area-inset-top));
+      background: var(--glass);
+      backdrop-filter: blur(22px) saturate(180%);
+      -webkit-backdrop-filter: blur(22px) saturate(180%);
+      border-bottom: 1px solid var(--hairline);
+      box-shadow: inset 0 1px 0 rgba(255,255,255,0.05);
+    }
+    .brand { display: flex; align-items: center; gap: 11px; }
+    .logo {
+      height: 34px; width: 34px; border-radius: 10px; flex: none;
+      display: grid; place-items: center; color: #fff; font-weight: 800; font-size: 18px;
+      background: linear-gradient(135deg, #0a84ff, #6e5bff);
+      box-shadow: var(--shadow-1), inset 0 1px 0 rgba(255,255,255,0.35);
+    }
+    .brand h1 { margin: 0; font-size: 16px; font-weight: 650; letter-spacing: -0.01em; }
+    .brand p { margin: 0; font-size: 12px; color: var(--text-3); letter-spacing: 0.01em; }
+    .status { text-align: right; font-size: 11px; color: var(--text-3); letter-spacing: 0.01em; }
+    .status .model { font-family: var(--mono); color: var(--text-2); }
+    .dot { display: inline-flex; align-items: center; gap: 5px; }
+    .dot::before { content: ""; height: 6px; width: 6px; border-radius: 50%; background: currentColor; box-shadow: 0 0 8px currentColor; }
+    .dot.ok { color: var(--ok); } .dot.bad { color: var(--g-F); }
+
+    /* ============================ Typography helpers ============================ */
+    .muted { color: var(--text-2); } .dim { color: var(--text-3); }
+    .mono { font-family: var(--mono); }
+    .title { font-size: 19px; font-weight: 650; letter-spacing: -0.015em; margin: 0; }
+
+    /* ============================ Cards ============================ */
+    .card {
+      background: var(--surface);
+      border: 1px solid var(--hairline);
+      border-radius: var(--r-lg);
+      box-shadow: var(--shadow-2);
+      padding: 22px;
+    }
+
+    /* ============================ Banner ============================ */
+    .banner {
+      margin-bottom: 20px; border-radius: var(--r-md);
+      border: 1px solid color-mix(in srgb, var(--g-F) 45%, transparent);
+      background: color-mix(in srgb, var(--g-F) 12%, var(--surface));
+      color: var(--text); padding: 12px 15px; font-size: 13.5px;
+    }
+    .banner code { font-family: var(--mono); font-size: 12.5px; }
+
+    /* ============================ Segmented control ============================ */
+    .segment { display: inline-flex; gap: 2px; padding: 3px; border-radius: 12px;
+      background: var(--surface-2); border: 1px solid var(--hairline); }
+    .seg-opt { border: 0; background: transparent; color: var(--text-2);
+      padding: 7px 15px; border-radius: 9px; font-size: 13px; font-weight: 550;
+      letter-spacing: -0.005em; transition: color var(--d-hover) var(--ease-out), transform var(--d-press) var(--ease-out); }
+    .seg-opt.on { background: var(--surface); color: var(--text); box-shadow: var(--shadow-1); }
+    .seg-opt:active { transform: scale(0.96); }
+
+    /* ============================ Fields ============================ */
+    .label { display: block; font-size: 13px; color: var(--text-2); margin-bottom: 7px; letter-spacing: -0.003em; }
+    .field { width: 100%; background: var(--surface-2); color: var(--text);
+      border: 1px solid var(--hairline); border-radius: var(--r-md); padding: 11px 13px;
+      font-size: 14px; transition: border-color var(--d-hover) var(--ease-out), box-shadow var(--d-hover) var(--ease-out); }
+    .field::placeholder { color: var(--text-3); }
+    .field:focus { outline: none; border-color: var(--accent); box-shadow: 0 0 0 4px var(--accent-weak); }
+    textarea.field { font-family: var(--mono); font-size: 13px; line-height: 1.55; resize: vertical; min-height: 220px; }
+    .field.code { font-family: var(--mono); }
+    .hint { margin: 8px 0 0; font-size: 12px; color: var(--text-3); }
+
+    /* ============================ Buttons ============================ */
+    .btn { border: 1px solid var(--hairline); background: var(--surface-2); color: var(--text);
+      border-radius: var(--r-md); padding: 9px 15px; font-size: 14px; font-weight: 550;
+      transition: background var(--d-hover) var(--ease-out), border-color var(--d-hover) var(--ease-out), transform var(--d-press) var(--ease-out); }
+    .btn:active { transform: scale(0.97); }
+    .btn-primary { border: 0; background: var(--accent); color: #fff; border-radius: var(--r-md);
+      padding: 12px 22px; font-size: 15px; font-weight: 600; letter-spacing: -0.01em;
+      box-shadow: var(--shadow-1), inset 0 1px 0 rgba(255,255,255,0.22);
+      transition: filter var(--d-hover) var(--ease-out), transform var(--d-press) var(--ease-out); }
+    .btn-primary:disabled { opacity: 0.4; cursor: not-allowed; }
+    .btn-primary:active:not(:disabled) { transform: scale(0.98); }
+    @media (hover: hover) and (pointer: fine) {
+      .btn:hover { background: var(--surface); border-color: var(--hairline-2); }
+      .btn-primary:hover:not(:disabled) { filter: brightness(1.08); }
+      .seg-opt:not(.on):hover { color: var(--text); }
+    }
+
+    /* ============================ Input view extras ============================ */
+    .row { display: flex; flex-wrap: wrap; align-items: center; gap: 14px; }
+    .spread { justify-content: space-between; }
+    .pillars { display: grid; grid-template-columns: repeat(3, 1fr); gap: 12px; margin-top: 18px; }
+    .pillar { border: 1px solid var(--hairline); background: color-mix(in srgb, var(--surface) 55%, transparent);
+      border-radius: var(--r-md); padding: 15px; }
+    .pillar h4 { margin: 0 0 4px; font-size: 13.5px; font-weight: 600; letter-spacing: -0.01em; }
+    .pillar p { margin: 0; font-size: 12.5px; color: var(--text-3); line-height: 1.45; }
+    @media (max-width: 620px) { .pillars { grid-template-columns: 1fr; } }
+
+    /* ============================ Running view ============================ */
+    .runhead { display: flex; align-items: center; gap: 12px; margin-bottom: 18px; }
+    .spinner { height: 20px; width: 20px; flex: none; color: var(--accent); animation: spin 0.9s linear infinite; }
+    .stage-label { font-size: 12.5px; color: var(--text-2); text-transform: capitalize; }
+    .stepper { display: flex; gap: 5px; margin-bottom: 16px; }
+    .stepper > div { flex: 1; height: 5px; border-radius: 99px; background: var(--surface-2);
+      transition: background var(--d-view) var(--ease-out); }
+    .stepper > div.on { background: var(--accent); }
+    .track { height: 8px; border-radius: 99px; background: var(--surface-2); overflow: hidden; margin-bottom: 18px; }
+    .track > div { height: 100%; border-radius: 99px;
+      background: linear-gradient(90deg, var(--accent), #6e5bff);
+      transition: width 450ms var(--ease-out); }
+    .logbox { height: 232px; overflow: auto; border-radius: var(--r-md);
+      background: var(--surface-2); border: 1px solid var(--hairline);
+      padding: 12px 13px; font-family: var(--mono); font-size: 12px; line-height: 1.7;
+      -webkit-mask-image: linear-gradient(to bottom, transparent, #000 14px); mask-image: linear-gradient(to bottom, transparent, #000 14px); }
+    .logline { display: flex; gap: 10px; }
+    .logline .s { color: var(--text-3); width: 84px; flex: none; }
+    .logline .m { color: var(--text-2); }
+
+    /* ============================ Results — summary ============================ */
+    .summary { display: flex; flex-wrap: wrap; align-items: center; gap: 24px; }
+    .grade { font-size: clamp(46px, 9vw, 66px); font-weight: 800; line-height: 0.95; letter-spacing: -0.045em; }
+    .grade-A{color:var(--g-A)} .grade-B{color:var(--g-B)} .grade-C{color:var(--g-C)}
+    .grade-D{color:var(--g-D)} .grade-F{color:var(--g-F)}
+    .grade-wrap { text-align: center; }
+    .grade-sub { font-size: 11.5px; color: var(--text-3); margin-top: 2px; letter-spacing: 0.02em; }
+    .sum-main { flex: 1; min-width: 220px; }
+    .sum-name { font-size: 17px; font-weight: 650; letter-spacing: -0.015em; }
+    .sum-meta { font-size: 12.5px; color: var(--text-3); margin: 3px 0 12px; }
+    .chips { display: flex; flex-wrap: wrap; gap: 7px; }
+    .chip { font-size: 11.5px; font-weight: 600; color: #fff; padding: 3px 10px; border-radius: 99px; letter-spacing: 0.01em; }
+    .chip.clean { background: color-mix(in srgb, var(--ok) 22%, transparent); color: var(--ok); }
+    .sum-actions { display: flex; flex-direction: column; gap: 8px; min-width: 150px; }
+    .sum-actions .two { display: flex; gap: 8px; }
+    .sum-actions .two .btn { flex: 1; text-align: center; font-size: 12px; padding: 7px; }
+    .btn.block { text-align: center; text-decoration: none; display: block; }
+    .triage { margin-top: 18px; padding-top: 16px; border-top: 1px solid var(--hairline);
+      font-size: 12.5px; color: var(--text-2); display: grid; gap: 5px; }
+    .triage .k { color: var(--text-3); }
+
+    /* ============================ Results — filters ============================ */
+    .filters { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; margin: 22px 0 14px; }
+    .fbtn { border: 1px solid var(--hairline); background: transparent; color: var(--text-2);
+      font-size: 12px; font-weight: 550; padding: 6px 12px; border-radius: 99px;
+      transition: background var(--d-hover) var(--ease-out), color var(--d-hover) var(--ease-out),
+        border-color var(--d-hover) var(--ease-out), transform var(--d-press) var(--ease-out); }
+    .fbtn:active { transform: scale(0.95); }
+    .fbtn.on-cat { background: var(--surface); color: var(--text); border-color: var(--hairline-2); }
+    .sep { width: 1px; height: 20px; background: var(--hairline); margin: 0 3px; }
+    .search { margin-left: auto; width: 170px; }
+
+    /* ============================ Findings (accordion) ============================ */
+    .findings { display: flex; flex-direction: column; gap: 10px; }
+    .finding { background: var(--surface); border: 1px solid var(--hairline);
+      border-left: 3px solid var(--g-x); border-radius: var(--r-md); overflow: hidden;
+      animation: materialize var(--d-view) var(--ease-out) both;
+      animation-delay: calc(var(--i, 0) * 38ms); }
+    .finding-head { width: 100%; text-align: left; border: 0; background: transparent;
+      display: flex; align-items: flex-start; gap: 12px; padding: 14px 16px;
+      transition: background var(--d-hover) var(--ease-out); }
+    @media (hover: hover) and (pointer: fine) { .finding-head:hover { background: color-mix(in srgb, var(--text) 4%, transparent); } }
+    .finding-head:active { background: color-mix(in srgb, var(--text) 7%, transparent); }
+    .tag { font-size: 10px; font-weight: 700; color: #fff; letter-spacing: 0.03em;
+      padding: 3px 7px; border-radius: 6px; margin-top: 1px; flex: none; }
+    .f-title { font-size: 14.5px; font-weight: 550; letter-spacing: -0.01em; }
+    .f-meta { margin-top: 3px; font-size: 12px; color: var(--text-3);
+      display: flex; flex-wrap: wrap; gap: 3px 12px; }
+    .f-meta .path { font-family: var(--mono); color: var(--accent); }
+    .chev { color: var(--text-3); flex: none; font-size: 18px; line-height: 1;
+      transition: transform var(--d-accordion) var(--ease-out); }
+    .finding.open .chev { transform: rotate(90deg); }
+    /* grid-rows accordion — the sanctioned height animation */
+    .finding-body { display: grid; grid-template-rows: 0fr;
+      transition: grid-template-rows var(--d-accordion) var(--ease-out); }
+    .finding.open .finding-body { grid-template-rows: 1fr; }
+    .finding-body > .inner { overflow: hidden; }
+    .f-detail { padding: 0 16px 16px 43px; display: grid; gap: 9px; font-size: 13.5px; line-height: 1.5; }
+    .f-detail .k { color: var(--text-3); }
+    .f-detail .fix { color: var(--ok); }
+    .f-detail pre { margin: 2px 0 0; background: var(--surface-2); border: 1px solid var(--hairline);
+      border-radius: var(--r-sm); padding: 11px; font-family: var(--mono); font-size: 12px;
+      line-height: 1.6; overflow: auto; color: var(--text-2); }
+    .empty { text-align: center; color: var(--text-3); font-size: 13.5px; padding: 32px; }
+
+    /* ============================ Footer ============================ */
+    .foot { margin-top: auto; text-align: center; font-size: 11.5px; color: var(--text-3);
+      padding: 22px 20px calc(22px + env(safe-area-inset-bottom)); }
+
+    /* ============================ Motion keyframes ============================ */
+    .view { animation: view-in var(--d-view) var(--ease-out) both; }
+    @keyframes view-in { from { opacity: 0; transform: translateY(7px) scale(0.992); } to { opacity: 1; transform: none; } }
+    .grade { animation: grade-in 420ms var(--ease-out) both; }
+    @keyframes grade-in { from { opacity: 0; transform: scale(0.86); } to { opacity: 1; transform: scale(1); } }
+    @keyframes materialize { from { opacity: 0; transform: translateY(6px); } to { opacity: 1; transform: none; } }
+    @keyframes spin { to { transform: rotate(360deg); } }
+    pre::-webkit-scrollbar, .logbox::-webkit-scrollbar { height: 8px; width: 8px; }
+    pre::-webkit-scrollbar-thumb, .logbox::-webkit-scrollbar-thumb { background: var(--hairline-2); border-radius: 8px; }
+
+    /* ============================ Accessibility ============================ */
+    @media (prefers-reduced-motion: reduce) {
+      *, *::before, *::after { animation-duration: 1ms !important; animation-delay: 0ms !important;
+        transition-duration: 1ms !important; }
+      .spinner { animation: spin 1.2s linear infinite !important; }
+      .view, .finding, .grade { animation: fade-only 200ms ease both; }
+      @keyframes fade-only { from { opacity: 0; } to { opacity: 1; } }
+    }
+    @media (prefers-reduced-transparency: reduce) {
+      .appbar { background: var(--surface); backdrop-filter: none; -webkit-backdrop-filter: none; }
+    }
+    @media (prefers-contrast: more) {
+      :root { --hairline: rgba(128,128,128,0.5); --hairline-2: rgba(128,128,128,0.7); --text-2: var(--text); }
+    }
+    :focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; border-radius: 4px; }
+  </style>
+</head>
+<body>
+<div class="app" x-data="scanApp()" x-init="init()" x-cloak>
+
+  <!-- App bar -->
+  <header class="appbar">
+    <div class="brand">
+      <div class="logo">V</div>
+      <div>
+        <h1>VibeAudit</h1>
+        <p>Bug finder for AI-coded apps</p>
+      </div>
+    </div>
+    <div class="status">
+      <div class="model" x-text="cfg.model || '…'"></div>
+      <div class="dot ok" x-show="cfg.configured">LLM connected</div>
+      <div class="dot bad" x-show="!cfg.configured">no API key</div>
+    </div>
+  </header>
+
+  <main class="wrap">
+    <div class="banner" x-show="!cfg.configured" x-cloak>
+      No <code>NVIDIA_API_KEY</code> configured. Add it to the project-root <code>.env</code> and restart the server.
+    </div>
+
+    <!-- ===================== INPUT ===================== -->
+    <section class="view" x-show="view==='input'">
+      <div class="card">
+        <div class="segment" style="margin-bottom:20px">
+          <template x-for="t in tabs" :key="t.id">
+            <button class="seg-opt" :class="tab===t.id && 'on'" @click="tab=t.id" x-text="t.label"></button>
+          </template>
+        </div>
+
+        <div x-show="tab==='local'">
+          <label class="label">Local project folder (absolute path)</label>
+          <input class="field code" x-model="form.local" spellcheck="false" placeholder="C:\path\to\your\app" />
+          <p class="hint">The server reads this folder from its own disk.</p>
+        </div>
+
+        <div x-show="tab==='github'">
+          <label class="label">Public GitHub repository URL</label>
+          <input class="field code" x-model="form.github" spellcheck="false" placeholder="https://github.com/user/repo" />
+          <p class="hint">Cloned shallow into a temp folder, then deleted after the scan.</p>
+        </div>
+
+        <div x-show="tab==='paste'">
+          <div class="row spread" style="margin-bottom:7px">
+            <label class="label" style="margin:0">Paste code</label>
+            <input class="field code" style="width:170px;padding:6px 10px" x-model="form.filename" placeholder="snippet.js" />
+          </div>
+          <textarea class="field" x-model="form.paste" spellcheck="false" placeholder="// paste a file or snippet here"></textarea>
+        </div>
+
+        <div class="row spread" style="margin-top:20px">
+          <div class="row" style="gap:9px">
+            <span class="muted" style="font-size:13px">Depth</span>
+            <div class="segment">
+              <button class="seg-opt" :class="form.depth==='quick' && 'on'" @click="form.depth='quick'">Quick · static</button>
+              <button class="seg-opt" :class="form.depth==='deep' && 'on'" @click="form.depth='deep'">Deep · + dynamic</button>
+            </div>
+          </div>
+          <button class="btn-primary" @click="start()" :disabled="!cfg.configured || !inputValue.trim()">Scan for bugs</button>
+        </div>
+        <p class="hint" x-show="form.depth==='deep'" style="color:var(--g-D)">
+          Deep also runs the app in a Docker sandbox to catch build, boot, and runtime errors.
+          Requires Docker Desktop running; it's skipped automatically if unavailable.
+        </p>
+      </div>
+
+      <div class="pillars">
+        <div class="pillar"><h4>Security</h4><p>Secrets, injection, auth, XSS, insecure defaults.</p></div>
+        <div class="pillar"><h4>Logic &amp; runtime</h4><p>Null access, bad async, crashes, missing error handling.</p></div>
+        <div class="pillar"><h4>Correctness</h4><p>API misuse, data-loss risks, performance footguns.</p></div>
+      </div>
+    </section>
+
+    <!-- ===================== RUNNING ===================== -->
+    <section class="view" x-show="view==='running'">
+      <div class="card">
+        <div class="runhead">
+          <svg class="spinner" viewBox="0 0 24 24" fill="none" aria-hidden="true">
+            <circle cx="12" cy="12" r="9" stroke="currentColor" stroke-width="3" opacity="0.25"/>
+            <path d="M21 12a9 9 0 0 0-9-9" stroke="currentColor" stroke-width="3" stroke-linecap="round"/>
+          </svg>
+          <div>
+            <div style="font-weight:600;letter-spacing:-0.01em">Scanning <span class="mono" style="color:var(--accent)" x-text="jobName"></span></div>
+            <div class="stage-label" x-text="stageLabel"></div>
+          </div>
+        </div>
+        <div class="stepper">
+          <template x-for="(s,i) in steps" :key="s">
+            <div :class="stepIndex>=i && 'on'"></div>
+          </template>
+        </div>
+        <div class="track"><div :style="'width:'+pct+'%'"></div></div>
+        <div class="logbox" x-ref="logbox">
+          <template x-for="(l,i) in log" :key="i">
+            <div class="logline"><span class="s" x-text="'['+l.stage+']'"></span><span class="m" x-text="l.message"></span></div>
+          </template>
+        </div>
+        <button class="btn" style="margin-top:16px" @click="reset()">Cancel</button>
+      </div>
+    </section>
+
+    <!-- ===================== ERROR ===================== -->
+    <section class="view" x-show="view==='error'">
+      <div class="card" style="border-color:color-mix(in srgb, var(--g-F) 45%, transparent)">
+        <h2 class="title" style="color:var(--g-F)">Scan failed</h2>
+        <p class="mono" style="font-size:13px;color:var(--text-2);margin:10px 0 0;word-break:break-word" x-text="error"></p>
+        <button class="btn" style="margin-top:16px" @click="reset()">Try again</button>
+      </div>
+    </section>
+
+    <!-- ===================== RESULTS ===================== -->
+    <section class="view" x-show="view==='done' && result">
+      <div class="card">
+        <div class="summary">
+          <div class="grade-wrap">
+            <div class="grade" :class="'grade-'+(result && result.risk_grade)" x-text="result && result.risk_grade"></div>
+            <div class="grade-sub">risk <span x-text="result && result.risk_score"></span>/100</div>
+          </div>
+          <div class="sum-main">
+            <div class="sum-name" x-text="result && result.input.name"></div>
+            <div class="sum-meta">
+              <span x-text="result && result.input.kind"></span>
+              <template x-if="result && result.triage && result.triage.app_type"><span> · <span x-text="result.triage.app_type"></span></span></template>
+              <template x-if="result && result.timings && result.timings.total_s"><span> · <span x-text="result.timings.total_s"></span>s</span></template>
+              <template x-if="result && result.counts && result.counts.dropped_false_positives"><span> · <span x-text="result.counts.dropped_false_positives"></span> false positive(s) filtered</span></template>
+            </div>
+            <div class="chips">
+              <template x-for="s in sevOrder" :key="s">
+                <span class="chip" x-show="countSev(s)>0" :style="'background:'+sevColor(s)">
+                  <span x-text="countSev(s)"></span> <span x-text="s"></span>
+                </span>
+              </template>
+              <span class="chip clean" x-show="result && (result.counts.total||0)===0">No issues found</span>
+            </div>
+          </div>
+          <div class="sum-actions">
+            <a class="btn block" :href="exportUrl('html')" target="_blank" rel="noopener">Open HTML report</a>
+            <div class="two">
+              <a class="btn block" :href="exportUrl('md')">.md</a>
+              <a class="btn block" :href="exportUrl('json')">.json</a>
+            </div>
+            <button class="btn-primary" style="padding:9px;font-size:13px" @click="reset()">New scan</button>
+          </div>
+        </div>
+        <template x-if="result && result.triage && (result.triage.frameworks.length || result.triage.risk_areas.length)">
+          <div class="triage">
+            <div x-show="result.triage.frameworks.length"><span class="k">Frameworks:</span> <span x-text="result.triage.frameworks.join(', ')"></span></div>
+            <div x-show="result.triage.risk_areas.length"><span class="k">Risk areas:</span> <span x-text="result.triage.risk_areas.join(', ')"></span></div>
+          </div>
+        </template>
+      </div>
+
+      <div class="filters" x-show="result && result.findings.length">
+        <template x-for="s in sevOrder" :key="s">
+          <button class="fbtn" @click="filters.sev[s]=!filters.sev[s]"
+            :style="filters.sev[s] ? 'background:'+sevColor(s)+';color:#fff;border-color:transparent' : ''">
+            <span x-text="s"></span> (<span x-text="countSev(s)"></span>)
+          </button>
+        </template>
+        <span class="sep"></span>
+        <template x-for="c in catOrder" :key="c">
+          <button class="fbtn" :class="filters.cat[c] && 'on-cat'" @click="filters.cat[c]=!filters.cat[c]" x-text="c"></button>
+        </template>
+        <input class="field search" x-model="filters.q" placeholder="search…" />
+      </div>
+
+      <div class="findings">
+        <template x-for="(f,i) in visibleFindings" :key="f.id">
+          <div class="finding" :class="expanded[f.id] && 'open'" :style="'border-left-color:'+sevColor(f.severity)+'; --i:'+Math.min(i,12)">
+            <button class="finding-head" @click="toggle(f.id)">
+              <span class="tag" :style="'background:'+sevColor(f.severity)" x-text="f.severity.toUpperCase()"></span>
+              <span style="flex:1;min-width:0">
+                <span class="f-title" x-text="f.title"></span>
+                <span class="f-meta">
+                  <span x-text="f.category"></span>
+                  <span class="path" x-text="f.file + (f.line_start ? ':'+f.line_start : '')"></span>
+                  <span>conf <span x-text="Math.round(f.confidence*100)"></span>%</span>
+                  <span x-show="f.cwe" x-text="f.cwe"></span>
+                  <span x-show="f.verdict==='confirmed'" style="color:var(--ok)">✓ verified</span>
+                  <span x-show="f.verdict==='plausible'">~ plausible</span>
+                </span>
+              </span>
+              <span class="chev">›</span>
+            </button>
+            <div class="finding-body">
+              <div class="inner">
+                <div class="f-detail">
+                  <div x-show="f.description"><span class="k">What:</span> <span x-text="f.description"></span></div>
+                  <div x-show="f.impact"><span class="k">Impact:</span> <span x-text="f.impact"></span></div>
+                  <div x-show="f.recommendation"><span class="fix">Fix:</span> <span x-text="f.recommendation"></span></div>
+                  <pre x-show="f.code_snippet" x-text="f.code_snippet"></pre>
+                </div>
+              </div>
+            </div>
+          </div>
+        </template>
+        <div class="empty" x-show="result && result.findings.length && !visibleFindings.length">No findings match the current filters.</div>
+      </div>
+    </section>
+  </main>
+
+  <footer class="foot">
+    VibeAudit · static analysis is LLM-assisted and may contain false positives — verify before acting.
+  </footer>
+</div>
+
+<script>
+function scanApp() {
+  return {
+    cfg: { configured: true, model: '' },
+    view: 'input',
+    tab: 'local',
+    tabs: [{id:'local',label:'Local folder'},{id:'github',label:'GitHub URL'},{id:'paste',label:'Paste code'}],
+    form: {
+      local: 'C:\\Users\\ashu3\\OneDrive\\Desktop\\JOB\\projects\\vibe-audit\\fixtures\\buggy-sample',
+      github: '', paste: '', filename: 'snippet.js', depth: 'quick',
+    },
+    steps: ['map','triage','analyze','aggregate','done'],
+    stepLabels: { map:'Mapping files', triage:'Understanding the app', analyze:'Auditing code', aggregate:'Ranking findings', done:'Done', error:'Error', ingest:'Reading input' },
+    sevOrder: ['critical','high','medium','low','info'],
+    catOrder: ['security','logic','quality'],
+    scanId: null, es: null, jobName: '',
+    stage: '', pct: 0, log: [], result: null, error: '', finished: false,
+    filters: { sev:{critical:true,high:true,medium:true,low:true,info:true}, cat:{security:true,logic:true,quality:true}, q:'' },
+    expanded: {},
+
+    async init() {
+      try { this.cfg = await (await fetch('/api/health')).json(); } catch (e) {}
+    },
+    get inputValue() { return this.tab==='local'?this.form.local : this.tab==='github'?this.form.github : this.form.paste; },
+    get stageLabel() { return this.stepLabels[this.stage] || this.stage || 'starting'; },
+    get stepIndex() { const i = this.steps.indexOf(this.stage); return i<0 ? 0 : i; },
+
+    async start() {
+      if (!this.inputValue.trim()) return;
+      const body = { kind: this.tab, value: this.inputValue, depth: this.form.depth };
+      if (this.tab==='paste') body.filename = this.form.filename || 'snippet.txt';
+      this.jobName = this.tab==='paste' ? body.filename : this.inputValue;
+      this.view='running'; this.log=[]; this.pct=0; this.stage='ingest'; this.result=null; this.error=''; this.finished=false; this.expanded={};
+      let res;
+      try { res = await fetch('/api/scan', {method:'POST', headers:{'Content-Type':'application/json'}, body:JSON.stringify(body)}); }
+      catch(e){ return this.fail('Could not reach the server.'); }
+      if (!res.ok) { let t=''; try{ t=(await res.json()).detail; }catch(e){} return this.fail(t || ('HTTP '+res.status)); }
+      this.scanId = (await res.json()).scan_id;
+      this.es = new EventSource(`/api/scan/${this.scanId}/events`);
+      this.es.onmessage = (e) => this.onEvent(JSON.parse(e.data));
+      this.es.onerror = () => { this.es && this.es.close(); };
+    },
+    onEvent(ev) {
+      if (ev.stage === 'result') { this.result = ev.data; return this.finish(); }
+      if (ev.message) this.log.push({stage: ev.stage||'', message: ev.message});
+      if (typeof ev.pct === 'number') this.pct = ev.pct;
+      if (ev.stage) this.stage = ev.stage;
+      if (ev.stage === 'error' && ev.message) this.error = ev.message;
+      this.$nextTick(() => { const el=this.$refs.logbox; if (el) el.scrollTop = el.scrollHeight; });
+    },
+    finish() {
+      if (this.finished) return; this.finished = true;
+      if (this.es) this.es.close();
+      if (this.result && this.result.status === 'error') { this.error = this.result.error || 'Scan failed.'; this.view='error'; }
+      else { this.pct=100; this.stage='done'; this.view='done'; }
+    },
+    fail(msg) { this.error = msg; this.view='error'; if (this.es) this.es.close(); },
+    reset() { if (this.es) this.es.close(); this.view='input'; this.result=null; this.log=[]; this.error=''; this.pct=0; },
+
+    toggle(id) { this.expanded[id] = !this.expanded[id]; },
+    countSev(s) { return (this.result && this.result.counts && this.result.counts.by_severity && this.result.counts.by_severity[s]) || 0; },
+    get visibleFindings() {
+      if (!this.result) return [];
+      const q = this.filters.q.toLowerCase();
+      return this.result.findings.filter(f =>
+        this.filters.sev[f.severity] && this.filters.cat[f.category] &&
+        (!q || (f.title+' '+f.file+' '+(f.description||'')).toLowerCase().includes(q))
+      );
+    },
+    exportUrl(fmt) { return `/api/scan/${this.scanId}/export?format=${fmt}`; },
+    sevColor(s) { return {critical:'#ff453a',high:'#ff9f0a',medium:'#d9870a',low:'#0a84ff',info:'#8e8e93'}[s] || '#8e8e93'; },
+  };
+}
+</script>
+</body>
+</html>

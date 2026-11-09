@@ -1,0 +1,1780 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
+  <meta name="color-scheme" content="dark" />
+  <meta name="theme-color" content="#09090b" />
+  <title>VibeAudit — find bugs in AI-coded apps</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com" />
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=Instrument+Serif:ital@0;1&family=JetBrains+Mono:wght@400;500&display=swap" rel="stylesheet" />
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/three.js/r128/three.min.js" integrity="sha384-CI3ELBVUz9XQO+97x6nwMDPosPR5XvsxW2ua7N1Xeygeh1IxtgqtCkGfQY9WWdHu" crossorigin="anonymous" referrerpolicy="no-referrer"></script>
+  <script defer src="https://cdnjs.cloudflare.com/ajax/libs/alpinejs/3.14.8/cdn.min.js" integrity="sha384-X9kJyAubVxnP0hcA+AMMs21U445qsnqhnUF8EBlEpP3a42Kh/JwWjlv2ZcvGfphb" crossorigin="anonymous" referrerpolicy="no-referrer"></script>
+  <style>
+    /* ================================ Tokens ================================ */
+    :root {
+      color-scheme: dark;
+      --bg: #09090b;
+      --ink: #f4f4f5;
+      --ink-2: #a1a1aa;
+      --ink-3: #71717a;
+      --ink-4: #4a4a52;
+      --line: rgba(255, 255, 255, 0.07);
+      --line-2: rgba(255, 255, 255, 0.12);
+      --line-3: rgba(255, 255, 255, 0.2);
+      --panel: linear-gradient(180deg, rgba(255,255,255,0.045), rgba(255,255,255,0.018));
+      --panel-solid: rgba(17, 17, 20, 0.72);
+      --well: rgba(0, 0, 0, 0.35);
+
+      --accent: #d6b98c;          /* champagne */
+      --accent-hi: #f1e2c4;
+      --accent-lo: #a6865b;
+      --accent-wash: rgba(214, 185, 140, 0.08);
+      --accent-edge: rgba(214, 185, 140, 0.38);
+      --ok: #7fd1a7;              /* sage */
+      --bad: #ef7f7a;
+
+      --sev-critical: #ef7f7a;
+      --sev-high: #eba46f;
+      --sev-medium: #dfc173;
+      --sev-low: #93b4e4;
+      --sev-info: #8b8b94;
+
+      --r-xl: 22px; --r-lg: 16px; --r-md: 12px; --r-sm: 9px;
+      --font: "Inter", system-ui, -apple-system, "Segoe UI", Roboto, sans-serif;
+      --serif: "Instrument Serif", "Iowan Old Style", Georgia, serif;
+      --mono: "JetBrains Mono", ui-monospace, "SF Mono", Consolas, monospace;
+
+      --ease: cubic-bezier(0.23, 1, 0.32, 1);
+      --ease-spring: cubic-bezier(0.34, 1.4, 0.64, 1);
+      --shadow: 0 1px 0 rgba(255,255,255,0.05) inset, 0 30px 60px -30px rgba(0,0,0,0.9), 0 0 0 1px rgba(0,0,0,0.4);
+    }
+
+    /* ================================ Base ================================ */
+    * { box-sizing: border-box; }
+    [x-cloak] { display: none !important; }
+    html { -webkit-text-size-adjust: 100%; }
+    body {
+      margin: 0; min-height: 100vh; min-height: 100dvh;
+      font-family: var(--font); font-size: 15px; line-height: 1.55; letter-spacing: -0.006em;
+      color: var(--ink); background: var(--bg);
+      -webkit-font-smoothing: antialiased; -webkit-tap-highlight-color: transparent;
+      font-feature-settings: "cv11", "ss01"; overflow-x: hidden;
+    }
+    button, input, textarea { font: inherit; color: inherit; letter-spacing: inherit; }
+    button { cursor: pointer; touch-action: manipulation; }
+    a { color: inherit; text-decoration: none; }
+    ::selection { background: rgba(214, 185, 140, 0.3); }
+    .tnum { font-variant-numeric: tabular-nums; }
+
+    /* Backdrop: warm top spotlight + fine dot grid + vignette */
+    .backdrop { position: fixed; inset: 0; z-index: 0; pointer-events: none; }
+    .backdrop::before { content: ""; position: absolute; inset: 0;
+      background-image: radial-gradient(rgba(255,255,255,0.075) 1px, transparent 1px); background-size: 26px 26px;
+      -webkit-mask-image: radial-gradient(ellipse 70% 55% at 50% 0%, #000 10%, transparent 75%); mask-image: radial-gradient(ellipse 70% 55% at 50% 0%, #000 10%, transparent 75%); }
+    .backdrop::after { content: ""; position: absolute; inset: 0;
+      background: radial-gradient(900px 480px at 50% -140px, rgba(214,185,140,0.10), transparent 70%),
+                  radial-gradient(1200px 700px at 50% 120%, rgba(255,255,255,0.025), transparent 70%); }
+    #stage { position: fixed; inset: 0; width: 100vw; height: 100vh; z-index: 0; pointer-events: none; }
+    .grain { position: fixed; inset: 0; z-index: 0; pointer-events: none; opacity: 0.035; mix-blend-mode: overlay;
+      background-image: url("data:image/svg+xml;utf8,<svg xmlns='http://www.w3.org/2000/svg' width='160' height='160'><filter id='n'><feTurbulence type='fractalNoise' baseFrequency='0.9' numOctaves='2' stitchTiles='stitch'/></filter><rect width='100%' height='100%' filter='url(%23n)'/></svg>"); }
+
+    .app { position: relative; z-index: 1; min-height: 100vh; min-height: 100dvh; display: flex; flex-direction: column; }
+    .wrap { width: 100%; max-width: 1160px; margin: 0 auto; padding: 40px 24px 80px; }
+
+    /* ================================ Header ================================ */
+    .appbar {
+      position: sticky; top: 0; z-index: 50;
+      display: flex; align-items: center; justify-content: space-between; gap: 16px;
+      padding: 12px 24px; padding-top: max(12px, env(safe-area-inset-top));
+      background: rgba(9, 9, 11, 0.6);
+      backdrop-filter: blur(20px) saturate(140%); -webkit-backdrop-filter: blur(20px) saturate(140%);
+      border-bottom: 1px solid var(--line);
+    }
+    .brand { display: flex; align-items: center; gap: 11px; cursor: pointer; }
+    .mark { width: 32px; height: 32px; border-radius: 9px; display: grid; place-items: center; flex: none;
+      background: linear-gradient(180deg, #1d1d21, #111114); border: 1px solid var(--line-2);
+      box-shadow: inset 0 1px 0 rgba(255,255,255,0.08), 0 6px 16px -8px rgba(0,0,0,0.8); }
+    .mark svg { width: 17px; height: 17px; }
+    .brand h1 { margin: 0; font-size: 15px; font-weight: 600; letter-spacing: -0.015em; }
+    .brand p { margin: 0; font-size: 11.5px; color: var(--ink-3); }
+    .status { display: inline-flex; align-items: center; gap: 9px; padding: 6px 12px; border-radius: 99px;
+      border: 1px solid var(--line); background: rgba(255,255,255,0.025); font-size: 12px; color: var(--ink-2); }
+    .status .mono { color: var(--ink-3); font-size: 11px; }
+    .dot { width: 6px; height: 6px; border-radius: 50%; background: var(--ok); box-shadow: 0 0 0 3px rgba(127,209,167,0.14); }
+    .dot.bad { background: var(--bad); box-shadow: 0 0 0 3px rgba(239,127,122,0.14); }
+    @media (max-width: 640px) { .status .mono { display: none; } .appbar { padding-left: 16px; padding-right: 16px; } .wrap { padding: 26px 16px 64px; } }
+
+    /* ================================ Surfaces & type ================================ */
+    .panel { position: relative; background: var(--panel), var(--panel-solid);
+      backdrop-filter: blur(22px) saturate(120%); -webkit-backdrop-filter: blur(22px) saturate(120%);
+      border: 1px solid var(--line); border-radius: var(--r-xl); box-shadow: var(--shadow); }
+    .panel.pad { padding: 24px; }
+    .serif { font-family: var(--serif); font-weight: 400; font-style: italic; letter-spacing: -0.01em; }
+    .mono { font-family: var(--mono); }
+    .k { color: var(--ink-3); }
+    .kicker { display: inline-flex; align-items: center; gap: 9px; font-size: 12px; color: var(--ink-2);
+      padding: 5px 12px 5px 10px; border-radius: 99px; border: 1px solid var(--line-2); background: rgba(255,255,255,0.03); }
+    .kicker i { width: 6px; height: 6px; border-radius: 50%; background: var(--accent); box-shadow: 0 0 10px var(--accent); }
+    .label-sm { font-size: 11px; font-weight: 500; letter-spacing: 0.08em; text-transform: uppercase; color: var(--ink-3); }
+    .section-title { display: flex; align-items: center; gap: 12px; margin: 0 0 14px; }
+    .section-title::after { content: ""; flex: 1; height: 1px; background: linear-gradient(90deg, var(--line-2), transparent); }
+
+    /* 3D tilt */
+    [data-tilt] { transform: perspective(1000px) rotateX(var(--rx, 0deg)) rotateY(var(--ry, 0deg));
+      transition: transform 700ms var(--ease), border-color 250ms, background 250ms; transform-style: preserve-3d; }
+    [data-tilt].tilting { transition: transform 100ms linear, border-color 250ms, background 250ms; }
+    .glare { position: absolute; inset: 0; border-radius: inherit; pointer-events: none; opacity: 0; transition: opacity 350ms;
+      background: radial-gradient(380px circle at var(--mx, 50%) var(--my, 50%), rgba(255,255,255,0.06), transparent 50%); }
+    .tilting .glare { opacity: 1; }
+    .lift { transform: translateZ(24px); }
+
+    /* Buttons */
+    .btn-primary { position: relative; display: inline-flex; align-items: center; justify-content: center; gap: 10px;
+      border: 0; border-radius: 12px; padding: 13px 20px; font-weight: 600; font-size: 14.5px; color: #0c0c0e;
+      background: linear-gradient(180deg, #faf8f3, #e9e4d9);
+      box-shadow: inset 0 1px 0 #fff, inset 0 -1px 0 rgba(0,0,0,0.12), 0 10px 30px -12px rgba(214,185,140,0.55), 0 1px 2px rgba(0,0,0,0.5);
+      transition: transform 140ms var(--ease), box-shadow 300ms, filter 200ms; }
+    .btn-primary .arr { transition: transform 300ms var(--ease); }
+    .btn-primary:hover:not(:disabled) .arr { transform: translateX(3px); }
+    .btn-primary:hover:not(:disabled) { box-shadow: inset 0 1px 0 #fff, inset 0 -1px 0 rgba(0,0,0,0.12), 0 14px 40px -12px rgba(214,185,140,0.75), 0 1px 2px rgba(0,0,0,0.5); }
+    .btn-primary:active:not(:disabled) { transform: scale(0.985); }
+    .btn-primary:disabled { opacity: 0.35; cursor: not-allowed; }
+    .btn-ghost { display: inline-flex; align-items: center; justify-content: center; gap: 8px;
+      border: 1px solid var(--line-2); background: rgba(255,255,255,0.03); color: var(--ink-2);
+      border-radius: 11px; padding: 9px 14px; font-size: 13px; font-weight: 500;
+      transition: background 200ms, color 200ms, border-color 200ms, transform 120ms; }
+    .btn-ghost:hover { background: rgba(255,255,255,0.06); color: var(--ink); border-color: var(--line-3); }
+    .btn-ghost:active { transform: scale(0.97); }
+    .kbd { font-family: var(--mono); font-size: 10.5px; padding: 2px 6px; border-radius: 5px; color: rgba(0,0,0,0.55);
+      background: rgba(0,0,0,0.06); border: 1px solid rgba(0,0,0,0.1); font-weight: 500; }
+
+    .banner { margin-bottom: 22px; padding: 12px 16px; border-radius: var(--r-md); font-size: 13.5px; line-height: 1.5;
+      background: rgba(239,127,122,0.06); border: 1px solid rgba(239,127,122,0.28); color: var(--ink); }
+    .banner code { font-family: var(--mono); font-size: 12.5px; color: var(--bad); }
+    .banner.warn { background: var(--accent-wash); border-color: var(--accent-edge); }
+    .banner.warn code { color: var(--accent); }
+
+    /* ================================ Input view ================================ */
+    .hero { display: grid; grid-template-columns: minmax(0, 1.05fr) minmax(0, 0.95fr); gap: 40px; align-items: center; }
+    .hero h2 { font-size: clamp(40px, 5.6vw, 68px); line-height: 1.0; letter-spacing: -0.045em; font-weight: 600; margin: 22px 0 16px; }
+    .hero h2 .serif { font-size: 1.08em; color: var(--accent-hi); letter-spacing: -0.02em; }
+    .hero .lede { color: var(--ink-2); font-size: 16px; max-width: 520px; margin: 0 0 28px; }
+    .core-slot { position: relative; aspect-ratio: 1; width: 100%; max-width: 480px; justify-self: center; }
+    .tag-float { position: absolute; display: inline-flex; align-items: center; gap: 8px; font-size: 11.5px; color: var(--ink-2);
+      padding: 6px 11px; border-radius: 99px; background: rgba(14,14,17,0.75); border: 1px solid var(--line-2);
+      backdrop-filter: blur(10px); -webkit-backdrop-filter: blur(10px); animation: bob 7s ease-in-out infinite; white-space: nowrap; }
+    .tag-float b { font-family: var(--mono); font-weight: 500; font-size: 10.5px; color: var(--c); }
+    @keyframes bob { 50% { transform: translateY(-8px); } }
+
+    .seg { position: relative; display: grid; grid-template-columns: repeat(3, 1fr); padding: 3px; border-radius: 11px;
+      background: var(--well); border: 1px solid var(--line); margin-bottom: 20px; }
+    .seg .ind { position: absolute; top: 3px; bottom: 3px; left: 3px; width: calc((100% - 6px) / 3); border-radius: 8px;
+      background: linear-gradient(180deg, rgba(255,255,255,0.09), rgba(255,255,255,0.05)); border: 1px solid var(--line-2);
+      box-shadow: 0 2px 8px rgba(0,0,0,0.4); transition: transform 450ms var(--ease-spring); }
+    .seg button { position: relative; z-index: 1; border: 0; background: none; padding: 8px 6px; font-size: 13px; font-weight: 500;
+      color: var(--ink-3); display: flex; align-items: center; justify-content: center; gap: 7px; transition: color 200ms; }
+    .seg button.on { color: var(--ink); }
+    .seg svg { width: 14px; height: 14px; }
+
+    .label { display: flex; align-items: center; justify-content: space-between; gap: 10px; font-size: 12.5px; color: var(--ink-2); margin-bottom: 8px; }
+    .field { width: 100%; background: var(--well); border: 1px solid var(--line); border-radius: var(--r-md); padding: 12px 14px;
+      font-size: 13.5px; color: var(--ink); transition: border-color 200ms, box-shadow 200ms; }
+    .field.code, textarea.field { font-family: var(--mono); font-size: 12.5px; }
+    textarea.field { min-height: 190px; resize: vertical; line-height: 1.65; }
+    .field::placeholder { color: var(--ink-4); }
+    .field:focus { outline: none; border-color: var(--accent-edge); box-shadow: 0 0 0 4px rgba(214,185,140,0.09); }
+    .hint { font-size: 12px; color: var(--ink-3); margin: 9px 0 0; }
+
+    .depths { display: grid; grid-template-columns: 1fr 1fr; gap: 10px; margin: 20px 0 20px; }
+    .depth { position: relative; text-align: left; border-radius: 14px; padding: 13px 14px; background: rgba(255,255,255,0.018);
+      border: 1px solid var(--line); transition: border-color 250ms, background 250ms; }
+    .depth:hover { border-color: var(--line-2); }
+    .depth.on { border-color: var(--accent-edge); background: var(--accent-wash); }
+    .depth .dt { display: flex; align-items: center; gap: 9px; font-weight: 600; font-size: 13.5px; }
+    .depth .dd { font-size: 12px; color: var(--ink-3); margin-top: 5px; line-height: 1.45; }
+    .depth .ic { width: 26px; height: 26px; border-radius: 8px; display: grid; place-items: center; border: 1px solid var(--line-2); background: rgba(255,255,255,0.03); color: var(--ink-2); }
+    .depth.on .ic { color: var(--accent); border-color: var(--accent-edge); }
+    .depth .ic svg { width: 14px; height: 14px; }
+    .depth .radio { position: absolute; top: 14px; right: 14px; width: 15px; height: 15px; border-radius: 50%; border: 1.5px solid var(--line-3); transition: all 300ms var(--ease-spring); }
+    .depth.on .radio { border: 4.5px solid var(--accent); box-shadow: 0 0 0 3px rgba(214,185,140,0.15); }
+    .run-btn { width: 100%; padding: 15px 20px; font-size: 15px; }
+    .counter { display: flex; align-items: center; justify-content: space-between; gap: 12px; margin-top: 8px; font-size: 11.5px; color: var(--ink-3); font-family: var(--mono); }
+    .counter .over { color: var(--bad); }
+    .link-btn { border: 0; background: none; padding: 2px 0; font-family: var(--font); font-size: 12.5px; font-weight: 500; color: var(--accent);
+      text-decoration: underline; text-decoration-color: var(--accent-edge); text-underline-offset: 3px; }
+    .link-btn:hover { color: var(--accent-hi); }
+    .form-error { margin: 12px 0 0; padding: 10px 13px; border-radius: 10px; font-size: 13px; line-height: 1.5;
+      background: rgba(239,127,122,0.07); border: 1px solid rgba(239,127,122,0.3); color: var(--ink); }
+    .fine { margin-top: 14px; font-size: 12px; color: var(--ink-3); line-height: 1.6; }
+    .fine b { color: var(--ink); font-weight: 500; }
+
+    .pillars { display: grid; grid-template-columns: repeat(3, 1fr); gap: 14px; margin-top: 64px; }
+    .pillar { position: relative; padding: 22px; border-radius: var(--r-lg); background: var(--panel), rgba(14,14,17,0.6); border: 1px solid var(--line);
+      backdrop-filter: blur(16px); -webkit-backdrop-filter: blur(16px); }
+    .pillar:hover { border-color: var(--line-2); }
+    .pillar .top { display: flex; align-items: center; justify-content: space-between; margin-bottom: 18px; }
+    .pillar .pi { width: 38px; height: 38px; border-radius: 11px; display: grid; place-items: center; color: var(--ink);
+      background: linear-gradient(180deg, rgba(255,255,255,0.08), rgba(255,255,255,0.02)); border: 1px solid var(--line-2);
+      box-shadow: inset 0 1px 0 rgba(255,255,255,0.08); }
+    .pillar .pi svg { width: 18px; height: 18px; }
+    .pillar .idx { font-family: var(--mono); font-size: 11px; color: var(--ink-4); }
+    .pillar h4 { margin: 0 0 6px; font-size: 15.5px; font-weight: 600; letter-spacing: -0.015em; }
+    .pillar p { margin: 0; font-size: 13px; color: var(--ink-3); line-height: 1.55; }
+
+    .recent { margin-top: 52px; }
+    .recent-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(250px, 1fr)); gap: 10px; }
+    .rcard { position: relative; display: flex; align-items: center; gap: 14px; padding: 13px 15px; border-radius: 14px; text-align: left; width: 100%;
+      background: var(--panel), rgba(14,14,17,0.6); border: 1px solid var(--line); backdrop-filter: blur(14px); -webkit-backdrop-filter: blur(14px); }
+    .rcard:hover { border-color: var(--line-2); }
+    .rgrade { width: 38px; height: 38px; border-radius: 10px; display: grid; place-items: center; font-weight: 600; font-size: 17px; flex: none;
+      color: var(--gc); background: color-mix(in srgb, var(--gc) 9%, transparent); border: 1px solid color-mix(in srgb, var(--gc) 28%, transparent); }
+    .rname { font-weight: 500; font-size: 13.5px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+    .rmeta { font-size: 11.5px; color: var(--ink-3); }
+    .rarrow { margin-left: auto; color: var(--ink-4); transition: transform 300ms var(--ease), color 200ms; }
+    .rcard:hover .rarrow { transform: translateX(3px); color: var(--ink-2); }
+
+    @media (max-width: 900px) {
+      .hero { grid-template-columns: 1fr; gap: 6px; }
+      .core-slot { order: -1; max-width: 320px; }
+      .pillars { grid-template-columns: 1fr; }
+    }
+    @media (max-width: 520px) { .depths { grid-template-columns: 1fr; } .tag-float { display: none; } }
+
+    /* ================================ Running view ================================ */
+    .run-head { display: flex; align-items: flex-end; justify-content: space-between; gap: 14px; margin-bottom: 24px; flex-wrap: wrap; }
+    .run-head h3 { margin: 6px 0 0; font-size: 28px; font-weight: 600; letter-spacing: -0.03em; }
+    .run-head h3 .serif { color: var(--accent-hi); font-size: 1.1em; }
+    .run-head .target { font-family: var(--mono); font-size: 12px; color: var(--ink-3); max-width: 600px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; display: block; margin-top: 4px; }
+    .run-grid { display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, 1fr); gap: 22px; align-items: start; }
+
+    .pipeline { list-style: none; margin: 0; padding: 10px; }
+    .step { position: relative; display: grid; grid-template-columns: 34px minmax(0, 1fr) auto; gap: 14px; align-items: start; padding: 11px 12px; border-radius: 12px;
+      transition: background 400ms var(--ease); }
+    .step::before, .step::after { content: ""; position: absolute; left: 28px; top: 44px; bottom: -12px; width: 1px; }
+    .step::before { background: var(--line-2); }
+    .step::after { background: linear-gradient(180deg, var(--ok), rgba(127,209,167,0.25)); transform: scaleY(0); transform-origin: top; transition: transform 800ms var(--ease); }
+    .step:last-child::before, .step:last-child::after { display: none; }
+    .step.is-done::after { transform: scaleY(1); }
+    .step.is-skipped::after { transform: scaleY(1); background: var(--line-2); }
+    .step.is-active { background: rgba(255,255,255,0.035); box-shadow: inset 0 0 0 1px var(--line); }
+
+    .node { position: relative; width: 34px; height: 34px; border-radius: 50%; display: grid; place-items: center; z-index: 1;
+      background: #111114; border: 1px solid var(--line-2); transition: background 400ms var(--ease), border-color 400ms, box-shadow 400ms; }
+    .node .num { font-family: var(--mono); font-size: 11px; color: var(--ink-4); transition: opacity 200ms; }
+    .node svg.check, .node svg.cross { position: absolute; width: 16px; height: 16px; fill: none; stroke-width: 2.6; stroke-linecap: round; stroke-linejoin: round; opacity: 0; }
+    .node .check { stroke: #0c1a13; }
+    .node .check path { stroke-dasharray: 24; stroke-dashoffset: 24; }
+    .node .cross { stroke: #2a0d0c; }
+    .node .arc { position: absolute; inset: -4px; border-radius: 50%; opacity: 0;
+      background: conic-gradient(from 0deg, transparent 0 60%, var(--accent) 100%);
+      -webkit-mask: radial-gradient(farthest-side, transparent calc(100% - 2px), #000 calc(100% - 1.5px)); mask: radial-gradient(farthest-side, transparent calc(100% - 2px), #000 calc(100% - 1.5px)); }
+    .step.is-active .node { border-color: var(--accent-edge); box-shadow: 0 0 0 5px rgba(214,185,140,0.07); }
+    .step.is-active .node .arc { opacity: 1; animation: spin 1.1s linear infinite; }
+    .step.is-active .node .num { color: var(--accent); }
+    .step.is-done .node { background: linear-gradient(180deg, #a6e6c4, var(--ok)); border-color: transparent;
+      box-shadow: inset 0 1px 0 rgba(255,255,255,0.6), 0 4px 14px -4px rgba(127,209,167,0.55); animation: pop 550ms var(--ease-spring); }
+    .step.is-done .node .num { opacity: 0; }
+    .step.is-done .node .check { opacity: 1; }
+    .step.is-done .node .check path { animation: draw 500ms 100ms var(--ease) forwards; }
+    .step.is-skipped .node { border-style: dashed; background: transparent; }
+    .step.is-error .node { background: linear-gradient(180deg, #f6b0ac, var(--bad)); border-color: transparent; }
+    .step.is-error .node .num { opacity: 0; }
+    .step.is-error .node .cross { opacity: 1; }
+    @keyframes pop { 0% { transform: scale(0.75); } 60% { transform: scale(1.1); } 100% { transform: scale(1); } }
+    @keyframes draw { to { stroke-dashoffset: 0; } }
+    @keyframes spin { to { transform: rotate(360deg); } }
+
+    .step-title { font-weight: 500; font-size: 14px; display: flex; align-items: center; gap: 8px; flex-wrap: wrap; line-height: 1.3; padding-top: 1px; }
+    .step.is-pending .step-title { color: var(--ink-3); }
+    .step.is-skipped .step-title { color: var(--ink-4); }
+    .chip { font-size: 10px; font-weight: 500; letter-spacing: 0.06em; text-transform: uppercase; padding: 2px 7px; border-radius: 5px; border: 1px solid var(--line-2); color: var(--ink-3); }
+    .chip.live { color: var(--accent); border-color: var(--accent-edge); background: var(--accent-wash); }
+    .step-desc { font-size: 12.5px; color: var(--ink-3); margin-top: 3px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+    .step.is-active .step-desc, .step.is-done .step-desc { font-family: var(--mono); font-size: 11.5px; color: var(--ink-2); }
+    .step.is-skipped .step-desc { color: var(--ink-4); }
+    .step-time { font-family: var(--mono); font-size: 11px; color: var(--ink-4); padding-top: 3px; }
+    .step.is-active .step-time { color: var(--accent); }
+    .step.is-done .step-time { color: var(--ink-3); }
+    .mini { height: 2px; border-radius: 2px; background: var(--line); margin-top: 9px; overflow: hidden; }
+    .mini > div { height: 100%; background: linear-gradient(90deg, var(--accent-lo), var(--accent-hi)); transition: width 500ms var(--ease); }
+
+    .ring-slot { position: relative; width: min(100%, 380px); aspect-ratio: 1; margin: -4px auto 4px; display: grid; place-items: center; }
+    .ring-slot svg.ring { position: absolute; inset: 0; width: 100%; height: 100%; transform: rotate(-90deg); overflow: visible; }
+    .ring circle { fill: none; }
+    .ring .bg { stroke: rgba(255,255,255,0.06); stroke-width: 1; }
+    .ring .fg { stroke: url(#ringGrad); stroke-width: 1.6; stroke-linecap: round; transition: stroke-dashoffset 800ms var(--ease); }
+    .ring .ticks { stroke: rgba(255,255,255,0.13); stroke-width: 2.2; }
+    .ring-center { position: relative; z-index: 1; text-align: center; pointer-events: none; isolation: isolate; }
+    .ring-center::before { content: ""; position: absolute; inset: -30px -46px; z-index: -1; border-radius: 50%;
+      background: radial-gradient(closest-side, rgba(9,9,11,0.92) 45%, rgba(9,9,11,0.6) 72%, transparent); }
+    .ring-center .pct { font-size: clamp(50px, 7vw, 64px); font-weight: 500; letter-spacing: -0.05em; line-height: 1; }
+    .ring-center .pct small { font-size: 0.4em; color: var(--ink-3); margin-left: 2px; letter-spacing: 0; }
+    .ring-center .now { font-size: 12.5px; color: var(--accent); margin-top: 10px; }
+    .ring-center .el { font-family: var(--mono); font-size: 11px; color: var(--ink-3); margin-top: 3px; }
+
+    .stats { display: grid; grid-template-columns: repeat(4, 1fr); border: 1px solid var(--line); border-radius: var(--r-lg); overflow: hidden; margin-bottom: 14px;
+      background: var(--panel), rgba(14,14,17,0.6); backdrop-filter: blur(14px); -webkit-backdrop-filter: blur(14px); }
+    .stat { padding: 14px 16px; }
+    .stat + .stat { border-left: 1px solid var(--line); }
+    .stat .v { font-size: 24px; font-weight: 500; letter-spacing: -0.03em; line-height: 1.1; font-variant-numeric: tabular-nums; }
+    .stat .v small { font-size: 14px; color: var(--ink-3); }
+    .stat .label-sm { margin-top: 4px; font-size: 10.5px; }
+    .bump { animation: bump 450ms var(--ease-spring); display: inline-block; }
+    @keyframes bump { 40% { transform: scale(1.15); color: var(--accent-hi); } }
+
+    .term { overflow: hidden; border-radius: var(--r-lg); }
+    .term-head { display: flex; align-items: center; justify-content: space-between; padding: 10px 14px; border-bottom: 1px solid var(--line); }
+    .term-head .dots { display: flex; gap: 6px; }
+    .term-head .dots i { width: 9px; height: 9px; border-radius: 50%; background: rgba(255,255,255,0.1); }
+    .term-body { height: 220px; overflow: auto; padding: 12px 14px; font-family: var(--mono); font-size: 11.5px; line-height: 1.8;
+      -webkit-mask-image: linear-gradient(to bottom, transparent, #000 18px); mask-image: linear-gradient(to bottom, transparent, #000 18px); }
+    .ln { display: grid; grid-template-columns: 62px 94px minmax(0, 1fr); gap: 10px; animation: lnin 360ms var(--ease) both; }
+    .ln .t { color: var(--ink-4); }
+    .ln .s { color: var(--ink-3); }
+    .ln .m { color: var(--ink-2); word-break: break-word; }
+    .ln.err .s, .ln.err .m { color: var(--bad); }
+    .ln.warn .m { color: var(--accent); }
+    .ln:last-of-type .m { color: var(--ink); }
+    .caret { display: inline-block; width: 6px; height: 12px; background: var(--accent); vertical-align: -1px; animation: blink 1s steps(1) infinite; margin-left: 176px; }
+    @keyframes blink { 50% { opacity: 0; } }
+    @keyframes lnin { from { opacity: 0; transform: translateY(4px); } }
+
+    @media (max-width: 900px) { .run-grid { grid-template-columns: 1fr; } .ring-slot { width: min(100%, 300px); order: -1; } }
+    @media (max-width: 560px) { .stats { grid-template-columns: repeat(2, 1fr); } .stat:nth-child(3) { border-left: 0; } .stat:nth-child(n+3) { border-top: 1px solid var(--line); }
+      .ln { grid-template-columns: 82px minmax(0,1fr); } .ln .t { display: none; } .caret { margin-left: 92px; } }
+
+    /* ================================ Results ================================ */
+    .res-hero { display: grid; grid-template-columns: 240px minmax(0, 1fr) 220px; gap: 32px; align-items: center; padding: 28px 30px; }
+    .medal-slot { position: relative; width: 240px; height: 240px; display: grid; place-items: center; perspective: 900px; }
+    .coin-tilt { transform-style: preserve-3d; transform: rotateX(var(--rx, 0deg)) rotateY(var(--ry, 0deg)); transition: transform 700ms var(--ease); }
+    .coin { position: relative; width: 132px; height: 132px; transform-style: preserve-3d; animation: coinIn 1300ms var(--ease-spring) both, float 7s 1.3s ease-in-out infinite; }
+    .coin .layer { position: absolute; inset: 0; border-radius: 50%; background: color-mix(in srgb, var(--gc) 35%, #1a1a1d); }
+    .coin .face { position: absolute; inset: 0; border-radius: 50%; display: grid; place-items: center; transform: translateZ(7px); overflow: hidden;
+      background:
+        radial-gradient(circle at 30% 22%, rgba(255,255,255,0.55), transparent 42%),
+        conic-gradient(from 20deg, color-mix(in srgb, var(--gc) 70%, #000), color-mix(in srgb, var(--gc) 75%, #fff), color-mix(in srgb, var(--gc) 65%, #000), color-mix(in srgb, var(--gc) 80%, #fff), color-mix(in srgb, var(--gc) 70%, #000));
+      box-shadow: inset 0 0 0 5px color-mix(in srgb, var(--gc) 55%, #fff), inset 0 0 0 6px rgba(0,0,0,0.3), inset 0 -12px 26px rgba(0,0,0,0.35), 0 18px 50px -14px color-mix(in srgb, var(--gc) 70%, transparent); }
+    .coin .face b { font-size: 70px; font-weight: 600; letter-spacing: -0.06em; color: rgba(12,12,14,0.78); text-shadow: 0 1px 0 rgba(255,255,255,0.45); line-height: 1; }
+    .coin .face::after { content: ""; position: absolute; inset: 0; background: linear-gradient(115deg, transparent 38%, rgba(255,255,255,0.4) 50%, transparent 62%);
+      background-size: 280% 100%; animation: glint 5s 1.5s ease-in-out infinite; mix-blend-mode: overlay; }
+    .coin .back { position: absolute; inset: 0; border-radius: 50%; transform: rotateY(180deg) translateZ(1px); background: color-mix(in srgb, var(--gc) 40%, #111); }
+    @keyframes coinIn { from { transform: rotateY(-540deg) scale(0.3); opacity: 0; } to { transform: rotateY(0) scale(1); opacity: 1; } }
+    @keyframes float { 50% { transform: translateY(-6px) rotateY(8deg); } }
+    @keyframes glint { 0%, 60% { background-position: 130% 0; } 100% { background-position: -40% 0; } }
+    .medal-cap { position: absolute; bottom: 0; left: 0; right: 0; text-align: center; }
+
+    .res-name { font-size: clamp(24px, 3vw, 32px); font-weight: 600; letter-spacing: -0.035em; line-height: 1.1; margin: 8px 0 12px; word-break: break-word; }
+    .metas { display: flex; flex-wrap: wrap; gap: 6px; margin-bottom: 18px; }
+    .meta { font-size: 11.5px; color: var(--ink-2); padding: 3px 9px; border-radius: 7px; background: rgba(255,255,255,0.035); border: 1px solid var(--line); display: inline-flex; align-items: center; gap: 6px; }
+    .meta.ok { color: var(--ok); border-color: rgba(127,209,167,0.25); background: rgba(127,209,167,0.06); }
+    .sevbar { display: flex; height: 6px; border-radius: 99px; overflow: hidden; background: rgba(255,255,255,0.05); gap: 2px; }
+    .sevbar > div { height: 100%; transform-origin: left; animation: grow 1100ms var(--ease) both; }
+    @keyframes grow { from { transform: scaleX(0); } }
+    .verdict { margin: 14px 0 0; font-size: 14px; color: var(--ink-2); line-height: 1.6; }
+    .verdict b { color: var(--ink); font-weight: 500; }
+    .gauge { position: relative; width: 200px; height: 116px; margin: 0 auto 14px; }
+    .gauge svg { width: 100%; height: 100%; overflow: visible; }
+    .gauge .v { position: absolute; left: 0; right: 0; bottom: 2px; text-align: center; font-size: 36px; font-weight: 500; letter-spacing: -0.05em; line-height: 1; font-variant-numeric: tabular-nums; }
+    .gauge .v .label-sm { display: block; margin-top: 6px; letter-spacing: 0.1em; font-size: 10px; }
+    .actions { display: grid; gap: 8px; }
+    .actions .two { display: grid; grid-template-columns: 1fr 1fr; gap: 8px; }
+    @media (max-width: 1000px) { .res-hero { grid-template-columns: 1fr; justify-items: center; text-align: center; } .metas { justify-content: center; } .actions { width: 100%; max-width: 320px; } }
+
+    .tiles { display: grid; grid-template-columns: repeat(5, 1fr); gap: 10px; margin: 20px 0; }
+    .tile { position: relative; text-align: left; padding: 15px 16px; border-radius: 14px; background: var(--panel), rgba(14,14,17,0.6); border: 1px solid var(--line);
+      backdrop-filter: blur(14px); -webkit-backdrop-filter: blur(14px); transition: opacity 300ms, border-color 250ms; }
+    .tile:hover { border-color: var(--line-2); }
+    .tile .v { font-size: 30px; font-weight: 500; letter-spacing: -0.04em; line-height: 1; font-variant-numeric: tabular-nums; }
+    .tile .l { font-size: 12px; color: var(--ink-2); text-transform: capitalize; margin-top: 8px; display: flex; align-items: center; gap: 7px; }
+    .tile .l i { width: 7px; height: 7px; border-radius: 2px; background: var(--c); }
+    .tile .tick { position: absolute; top: 13px; right: 13px; width: 14px; height: 14px; border-radius: 4px; border: 1px solid var(--line-3); display: grid; place-items: center; }
+    .tile .tick svg { width: 10px; height: 10px; stroke: var(--ink); opacity: 0; transition: opacity 200ms; }
+    .tile.on .tick { background: rgba(255,255,255,0.1); border-color: var(--line-3); }
+    .tile.on .tick svg { opacity: 1; }
+    .tile.off { opacity: 0.4; }
+    @media (max-width: 760px) { .tiles { grid-template-columns: repeat(3, 1fr); } }
+    @media (max-width: 460px) { .tiles { grid-template-columns: repeat(2, 1fr); } }
+
+    .toolbar { display: flex; flex-wrap: wrap; align-items: center; gap: 6px; margin-bottom: 14px; }
+    .pill-btn { border: 1px solid var(--line); background: transparent; color: var(--ink-3); font-size: 12.5px; font-weight: 500; padding: 6px 12px; border-radius: 9px; text-transform: capitalize;
+      transition: all 200ms var(--ease); display: inline-flex; align-items: center; gap: 7px; }
+    .pill-btn svg { width: 13px; height: 13px; }
+    .pill-btn:hover { color: var(--ink-2); border-color: var(--line-2); }
+    .pill-btn.on { color: var(--ink); border-color: var(--line-3); background: rgba(255,255,255,0.06); }
+    .pill-btn .n { font-family: var(--mono); font-size: 11px; color: var(--ink-3); }
+    .search-wrap { margin-left: auto; position: relative; width: 240px; }
+    .search-wrap svg { position: absolute; left: 11px; top: 50%; transform: translateY(-50%); width: 14px; height: 14px; color: var(--ink-3); }
+    .search-wrap .field { padding: 8px 12px 8px 32px; border-radius: 9px; font-size: 13px; }
+    @media (max-width: 640px) { .search-wrap { width: 100%; margin-left: 0; } }
+
+    .findings { display: flex; flex-direction: column; gap: 8px; }
+    .finding { position: relative; border-radius: 14px; background: var(--panel), rgba(14,14,17,0.62); border: 1px solid var(--line);
+      backdrop-filter: blur(14px); -webkit-backdrop-filter: blur(14px); overflow: hidden;
+      animation: rise 600ms var(--ease) both; animation-delay: calc(var(--i, 0) * 40ms); transition: border-color 250ms, transform 350ms var(--ease), box-shadow 350ms; }
+    .finding::before { content: ""; position: absolute; left: 0; top: 14px; bottom: 14px; width: 2px; border-radius: 0 2px 2px 0; background: var(--c); }
+    @media (hover: hover) and (pointer: fine) { .finding:hover { border-color: var(--line-2); transform: translateY(-1px); box-shadow: 0 16px 40px -24px rgba(0,0,0,0.9); } }
+    .finding.open { border-color: var(--line-2); }
+    @keyframes rise { from { opacity: 0; transform: translateY(10px); } }
+    .fhead { width: 100%; display: flex; align-items: flex-start; gap: 14px; padding: 15px 16px 15px 20px; border: 0; background: none; text-align: left; }
+    .fidx { font-family: var(--mono); font-size: 11px; color: var(--ink-4); padding-top: 3px; width: 20px; flex: none; }
+    .sev { flex: none; display: inline-flex; align-items: center; gap: 6px; font-size: 11px; font-weight: 500; text-transform: capitalize; padding: 2px 8px 2px 7px; border-radius: 6px; margin-top: 1px;
+      color: var(--c); background: color-mix(in srgb, var(--c) 9%, transparent); border: 1px solid color-mix(in srgb, var(--c) 24%, transparent); width: 74px; }
+    .sev::before { content: ""; width: 5px; height: 5px; border-radius: 50%; background: var(--c); }
+    .ftitle { font-weight: 500; font-size: 14.5px; line-height: 1.4; letter-spacing: -0.012em; }
+    .fmeta { display: flex; flex-wrap: wrap; gap: 4px 14px; margin-top: 5px; font-size: 12px; color: var(--ink-3); align-items: center; }
+    .fmeta .path { font-family: var(--mono); font-size: 11.5px; color: var(--ink-2); word-break: break-all; }
+    .fmeta .ok { color: var(--ok); }
+    .confbar { display: inline-block; width: 36px; height: 3px; border-radius: 3px; background: rgba(255,255,255,0.08); vertical-align: middle; margin-right: 6px; overflow: hidden; }
+    .confbar > i { display: block; height: 100%; background: var(--ink-2); }
+    .chev { flex: none; width: 26px; height: 26px; border-radius: 8px; display: grid; place-items: center; color: var(--ink-3); border: 1px solid var(--line); transition: transform 380ms var(--ease-spring), color 200ms; }
+    .chev svg { width: 12px; height: 12px; }
+    .finding.open .chev { transform: rotate(90deg); color: var(--ink); }
+    .fbody { display: grid; grid-template-rows: 0fr; transition: grid-template-rows 400ms var(--ease); }
+    .finding.open .fbody { grid-template-rows: 1fr; }
+    .fbody > div { overflow: hidden; }
+    .fdetail { padding: 2px 20px 20px 54px; display: grid; gap: 14px; font-size: 13.5px; line-height: 1.65; color: var(--ink-2); }
+    .fdetail h6 { margin: 0 0 3px; }
+    .fix { padding: 13px 15px; border-radius: 12px; background: rgba(127,209,167,0.05); border: 1px solid rgba(127,209,167,0.2); color: var(--ink); position: relative; }
+    .fix h6 { color: var(--ok); }
+    .copy { position: absolute; top: 9px; right: 9px; font-size: 11px; border: 1px solid var(--line-2); background: rgba(0,0,0,0.3); color: var(--ink-2); border-radius: 7px; padding: 3px 9px; }
+    .copy:hover { color: var(--ink); }
+    .fdetail pre { margin: 0; padding: 14px; border-radius: 12px; background: rgba(0,0,0,0.45); border: 1px solid var(--line); font-family: var(--mono); font-size: 12px; line-height: 1.7; overflow: auto; color: #d4d4d8; }
+    @media (max-width: 560px) { .fdetail { padding-left: 20px; } .fidx { display: none; } .sev { width: auto; } }
+    .empty { text-align: center; color: var(--ink-3); padding: 40px; font-size: 14px; }
+    .clean { text-align: center; padding: 52px 20px; }
+    .clean b { display: block; font-family: var(--serif); font-style: italic; font-weight: 400; font-size: 34px; color: var(--ok); margin-bottom: 4px; }
+
+    .err-card { max-width: 620px; margin: 48px auto; text-align: center; padding: 40px 30px; }
+    .err-ic { width: 56px; height: 56px; margin: 0 auto 18px; border-radius: 50%; display: grid; place-items: center; background: linear-gradient(180deg, #f6b0ac, var(--bad)); box-shadow: 0 10px 30px -10px rgba(239,127,122,0.6); }
+    .err-card h3 { font-size: 24px; letter-spacing: -0.03em; margin: 0 0 10px; font-weight: 600; }
+    .err-card p { font-family: var(--mono); font-size: 12.5px; color: var(--ink-2); word-break: break-word; margin: 0 0 22px; line-height: 1.6; }
+
+    /* ================================ Header nav ================================ */
+    .nav { display: flex; gap: 2px; padding: 3px; margin-left: auto; border-radius: 11px; border: 1px solid var(--line); background: rgba(255,255,255,0.02); }
+    .nav a { padding: 6px 12px; border-radius: 8px; font-size: 12.5px; font-weight: 500; color: var(--ink-3); white-space: nowrap;
+      transition: color 200ms, background 200ms, box-shadow 200ms; }
+    .nav a:hover { color: var(--ink); }
+    .nav a.on { color: var(--ink); background: rgba(255,255,255,0.07); box-shadow: inset 0 0 0 1px var(--line-2); }
+    .nav.locked { opacity: 0.4; pointer-events: none; }
+    @media (max-width: 640px) { .brand p { display: none; } }
+    @media (max-width: 480px) { .appbar .status { display: none; } .nav a { padding: 6px 10px; } }
+
+    /* ================================ How it works ================================ */
+    .how-sec { margin-top: 84px; }
+    .how-sec > h3 { font-size: clamp(26px, 3.2vw, 36px); font-weight: 600; letter-spacing: -0.035em; line-height: 1.1; margin: 14px 0 10px; }
+    .how-sec > h3 .serif { color: var(--accent-hi); font-size: 1.08em; }
+    .how-sec > .sub { color: var(--ink-2); max-width: 660px; margin: 0 0 26px; font-size: 15px; }
+    .how-facts { margin: 4px 0 0; }
+    .how-core { max-width: 420px; }
+    .how-facts .stat .label-sm { line-height: 1.4; }
+
+    .pipe { display: grid; grid-template-columns: minmax(0, 0.92fr) minmax(0, 1.08fr); gap: 22px; align-items: start; }
+    .pipe-list { list-style: none; margin: 0; padding: 10px; }
+    .pipe-list li { position: relative; }
+    .pipe-list li:not(:last-child)::before, .pipe-list li:not(:last-child)::after { content: ""; position: absolute; left: 28.5px; top: 45px; bottom: -11px; width: 1px; z-index: 0; }
+    .pipe-list li:not(:last-child)::before { background: var(--line-2); }
+    .pipe-list li:not(:last-child)::after { background: linear-gradient(180deg, var(--ok), rgba(127,209,167,0.25)); transform: scaleY(0); transform-origin: top; transition: transform 700ms var(--ease); }
+    .pipe-list li.past::after { transform: scaleY(1); }
+    .pstep { position: relative; width: 100%; display: grid; grid-template-columns: 34px minmax(0, 1fr); gap: 14px; align-items: start; text-align: left;
+      padding: 11px 12px; border: 0; background: none; border-radius: 12px; transition: background 300ms var(--ease), box-shadow 300ms; }
+    .pstep:hover { background: rgba(255,255,255,0.025); }
+    .pstep.on { background: rgba(255,255,255,0.045); box-shadow: inset 0 0 0 1px var(--line-2); }
+    .pnode { position: relative; z-index: 1; width: 34px; height: 34px; border-radius: 50%; display: grid; place-items: center;
+      background: #111114; border: 1px solid var(--line-2); font-family: var(--mono); font-size: 11px; color: var(--ink-4);
+      transition: background 400ms var(--ease), border-color 400ms, box-shadow 400ms, color 300ms; }
+    .pnode svg { position: absolute; width: 15px; height: 15px; fill: none; stroke: #0c1a13; stroke-width: 2.6; stroke-linecap: round; stroke-linejoin: round; opacity: 0; transition: opacity 250ms; }
+    .pstep.on .pnode { border-color: var(--accent-edge); color: var(--accent); box-shadow: 0 0 0 5px rgba(214,185,140,0.08); }
+    .past .pnode { background: linear-gradient(180deg, #a6e6c4, var(--ok)); border-color: transparent; color: transparent;
+      box-shadow: inset 0 1px 0 rgba(255,255,255,0.6), 0 4px 14px -4px rgba(127,209,167,0.5); }
+    .past .pnode svg { opacity: 1; }
+    .pt { font-weight: 500; font-size: 14px; display: flex; align-items: center; gap: 8px; flex-wrap: wrap; line-height: 1.3; padding-top: 1px; }
+    .pd { font-size: 12.5px; color: var(--ink-3); margin-top: 3px; line-height: 1.45; }
+    .chip.off { border-style: dashed; color: var(--ink-4); }
+
+    .pdetail { position: sticky; top: 86px; padding: 26px; overflow: hidden; }
+    .pdetail .pin { animation: viewIn 500ms var(--ease) both; }
+    .pdetail .step-no { font-family: var(--mono); font-size: 11.5px; color: var(--accent); }
+    .pdetail h4 { font-size: 23px; font-weight: 600; letter-spacing: -0.03em; margin: 6px 0 14px; }
+    .pdetail p { color: var(--ink-2); font-size: 14px; line-height: 1.7; margin: 0 0 14px; }
+    .pdetail .why { border-left: 2px solid var(--accent-edge); padding: 2px 0 2px 14px; color: var(--ink-2); font-size: 13.5px; }
+    .pdetail .why b { color: var(--ink); font-weight: 500; }
+    .pdetail .metas { justify-content: flex-start; }
+    .code-ex { margin: 0; padding: 14px; border-radius: 12px; background: rgba(0,0,0,0.45); border: 1px solid var(--line);
+      font-family: var(--mono); font-size: 11.5px; line-height: 1.75; overflow: auto; color: #d4d4d8; white-space: pre; }
+    .ex-label { display: flex; align-items: center; justify-content: space-between; margin: 18px 0 8px; }
+    .pfoot { display: flex; align-items: center; justify-content: space-between; gap: 10px; margin-top: 20px; padding-top: 16px; border-top: 1px solid var(--line); flex-wrap: wrap; }
+    .pfoot .btns { display: flex; gap: 6px; }
+    .pfoot .btn-ghost { padding: 7px 12px; font-size: 12.5px; }
+    .pfoot .btn-ghost:disabled { opacity: 0.35; cursor: default; }
+    .pfoot .btn-ghost svg { width: 13px; height: 13px; }
+
+    .grade-grid { display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, 1fr); gap: 22px; align-items: stretch; }
+    .formula { font-family: var(--mono); font-size: 15px; padding: 16px 18px; border-radius: 12px; background: rgba(0,0,0,0.4); border: 1px solid var(--line); margin-bottom: 20px; }
+    .formula span { color: var(--accent); }
+    .formula small { display: block; color: var(--ink-3); font-size: 11.5px; margin-top: 4px; }
+    .weights { display: grid; gap: 10px; }
+    .wrow { display: grid; grid-template-columns: 74px minmax(0, 1fr) 34px; gap: 12px; align-items: center; font-size: 13px; }
+    .wrow .bar { height: 6px; border-radius: 99px; background: rgba(255,255,255,0.05); overflow: hidden; }
+    .wrow .bar i { display: block; height: 100%; border-radius: 99px; background: var(--c); }
+    .wrow .w { font-family: var(--mono); font-size: 12px; color: var(--ink-2); text-align: right; }
+    .grade-notes { margin: 20px 0 0; padding: 0; list-style: none; display: grid; gap: 8px; font-size: 13px; color: var(--ink-3); line-height: 1.55; }
+    .grade-notes li { padding-left: 16px; position: relative; }
+    .grade-notes li::before { content: ""; position: absolute; left: 2px; top: 8px; width: 5px; height: 5px; border-radius: 50%; background: var(--ink-4); }
+
+    .calc-rows { display: grid; gap: 8px; }
+    .crow { display: flex; align-items: center; justify-content: space-between; gap: 12px; padding: 8px 10px 8px 12px; border-radius: 11px; border: 1px solid var(--line); background: rgba(255,255,255,0.015); }
+    .crow .sev { width: auto; }
+    .stepper { display: inline-flex; align-items: center; border: 1px solid var(--line-2); border-radius: 9px; overflow: hidden; }
+    .stepper button { width: 30px; height: 28px; border: 0; background: rgba(255,255,255,0.03); color: var(--ink-2); font-size: 15px; line-height: 1; transition: background 150ms, color 150ms; }
+    .stepper button:hover:not(:disabled) { background: rgba(255,255,255,0.08); color: var(--ink); }
+    .stepper button:disabled { opacity: 0.3; cursor: default; }
+    .stepper output { width: 32px; text-align: center; font-family: var(--mono); font-size: 13px; font-variant-numeric: tabular-nums; }
+    .calc-out { display: flex; align-items: center; gap: 18px; margin: 20px 0 16px; }
+    .calc-out .rgrade { width: 64px; height: 64px; font-size: 32px; border-radius: 16px; transition: color 300ms, background 300ms, border-color 300ms; }
+    .calc-out .score { font-size: 30px; font-weight: 500; letter-spacing: -0.04em; line-height: 1; font-variant-numeric: tabular-nums; }
+    .calc-out .score small { font-size: 13px; color: var(--ink-3); letter-spacing: 0; margin-left: 3px; }
+    .calc-out .gl { font-size: 12.5px; color: var(--ink-3); margin-top: 6px; }
+    .scale { position: relative; display: flex; gap: 2px; height: 8px; border-radius: 99px; overflow: visible; }
+    .scale > div { height: 100%; background: var(--c); opacity: 0.85; }
+    .scale > div:first-child { border-radius: 99px 0 0 99px; } .scale > div:nth-child(5) { border-radius: 0 99px 99px 0; }
+    .scale .marker { position: absolute; top: -5px; width: 3px; height: 18px; border-radius: 2px; background: var(--ink); opacity: 1;
+      box-shadow: 0 0 0 3px rgba(9,9,11,0.85); transform: translateX(-50%); transition: left 500ms var(--ease-spring); }
+    .scale-labels { display: flex; gap: 2px; margin-top: 8px; font-family: var(--mono); font-size: 10.5px; color: var(--ink-3); }
+    .scale-labels span { text-align: center; }
+
+    .check-grid { display: grid; grid-template-columns: repeat(3, 1fr); gap: 14px; }
+    .check-grid ul, .plist { list-style: none; margin: 0; padding: 0; display: grid; gap: 9px; }
+    .check-grid li, .plist li { position: relative; padding-left: 24px; font-size: 13.5px; color: var(--ink-2); line-height: 1.5; }
+    .check-grid li::before, .plist li::before { content: ""; position: absolute; left: 0; top: 3px; width: 15px; height: 15px; border-radius: 5px;
+      background: rgba(127,209,167,0.1) url("data:image/svg+xml;utf8,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='%237fd1a7' stroke-width='3' stroke-linecap='round' stroke-linejoin='round'><path d='m6 12.5 4 4 8-9'/></svg>") center / 10px no-repeat;
+      border: 1px solid rgba(127,209,167,0.25); }
+    .plist.warn li::before { background: rgba(214,185,140,0.08) url("data:image/svg+xml;utf8,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='%23d6b98c' stroke-width='3' stroke-linecap='round'><path d='M12 7v6M12 17h.01'/></svg>") center / 10px no-repeat;
+      border-color: var(--accent-edge); }
+    .plist b, .check-grid b { color: var(--ink); font-weight: 500; }
+    .two-col { display: grid; grid-template-columns: 1fr 1fr; gap: 14px; }
+    .two-col h4 { margin: 0 0 16px; font-size: 15.5px; font-weight: 600; letter-spacing: -0.015em; display: flex; align-items: center; gap: 10px; }
+    .two-col h4 .pi { width: 30px; height: 30px; border-radius: 9px; display: grid; place-items: center; border: 1px solid var(--line-2); background: rgba(255,255,255,0.04); }
+    .two-col h4 .pi svg { width: 15px; height: 15px; }
+
+    .cta { margin-top: 84px; text-align: center; padding: 44px 24px; }
+    .cta h3 { font-size: clamp(26px, 3.4vw, 38px); font-weight: 600; letter-spacing: -0.035em; margin: 0 0 10px; }
+    .cta h3 .serif { color: var(--accent-hi); font-size: 1.08em; }
+    .cta p { color: var(--ink-2); margin: 0 auto 24px; max-width: 480px; }
+    .cta .row { display: flex; gap: 10px; justify-content: center; flex-wrap: wrap; }
+
+    @media (max-width: 900px) {
+      .pipe, .grade-grid, .two-col { grid-template-columns: 1fr; }
+      .pdetail { position: relative; top: 0; }
+      .how-core { max-width: 240px; }
+      .check-grid { grid-template-columns: 1fr; }
+      .how-sec, .cta { margin-top: 60px; }
+    }
+
+    .foot { margin-top: auto; text-align: center; font-size: 11.5px; color: var(--ink-4); padding: 24px 20px calc(24px + env(safe-area-inset-bottom)); }
+
+    .view { animation: viewIn 700ms var(--ease) both; }
+    @keyframes viewIn { from { opacity: 0; transform: translateY(14px); filter: blur(4px); } }
+    .stagger > * { animation: viewIn 800ms var(--ease) both; }
+    .stagger > *:nth-child(2) { animation-delay: 70ms; } .stagger > *:nth-child(3) { animation-delay: 140ms; } .stagger > *:nth-child(4) { animation-delay: 210ms; }
+
+    ::-webkit-scrollbar { width: 10px; height: 10px; }
+    ::-webkit-scrollbar-thumb { background: rgba(255,255,255,0.09); border-radius: 10px; border: 2px solid transparent; background-clip: padding-box; }
+    :focus-visible { outline: 2px solid var(--accent); outline-offset: 3px; border-radius: 8px; }
+    @media (prefers-reduced-motion: reduce) {
+      *, *::before, *::after { animation-duration: 1ms !important; animation-delay: 0ms !important; animation-iteration-count: 1 !important; transition-duration: 1ms !important; }
+      .step.is-active .node .arc { animation: spin 1.6s linear infinite !important; animation-iteration-count: infinite !important; }
+    }
+  </style>
+</head>
+<body>
+<div class="backdrop" aria-hidden="true"></div>
+<canvas id="stage" aria-hidden="true"></canvas>
+<div class="grain" aria-hidden="true"></div>
+
+<div class="app" x-data="scanApp()" x-init="init()" x-cloak>
+  <header class="appbar">
+    <div class="brand" @click="view!=='running' && reset()">
+      <div class="mark">
+        <svg viewBox="0 0 24 24" fill="none" stroke-linecap="round" stroke-linejoin="round">
+          <path d="M12 2.8 20 7.4v9.2L12 21.2 4 16.6V7.4z" stroke="#d6b98c" stroke-width="1.6"/>
+          <path d="m8.4 12.2 2.5 2.5 4.8-5.2" stroke="#f4f4f5" stroke-width="1.9"/>
+        </svg>
+      </div>
+      <div><h1>VibeAudit</h1><p>Bug finder for AI-coded apps</p></div>
+    </div>
+    <nav class="nav" :class="view==='running' && 'locked'" aria-label="Main">
+      <a href="/" :class="view!=='how' && 'on'" :aria-current="view!=='how' ? 'page' : null" @click.prevent="go('/')">Audit</a>
+      <a href="/how-it-works" :class="view==='how' && 'on'" :aria-current="view==='how' ? 'page' : null" @click.prevent="go('/how-it-works')">How it works</a>
+    </nav>
+    <div class="status">
+      <span class="dot" :class="!cfg.configured && 'bad'"></span>
+      <span x-text="cfg.configured ? 'Model online' : 'No API key'"></span>
+      <span class="mono" x-show="cfg.model" x-text="shortModel"></span>
+    </div>
+  </header>
+
+  <main class="wrap">
+    <div class="banner" x-show="!cfg.configured">
+      <template x-if="cfg.progress === 'poll'"><span>The auditor isn't accepting audits right now. Please try again a little later.</span></template>
+      <template x-if="cfg.progress !== 'poll'"><span>No <code>NVIDIA_API_KEY</code> configured. Add it to the project-root <code>.env</code> and restart the server.</span></template>
+    </div>
+
+    <!-- ============================ INPUT ============================ -->
+    <section x-show="view==='input'" class="view">
+      <div class="hero">
+        <div class="stagger">
+          <span class="kicker"><i></i><span x-text="isPublic ? 'Secret scan · LLM review · Verification pass' : 'Static analysis · LLM review · Runtime sandbox'"></span></span>
+          <h2>Find the bugs your AI <span class="serif">left behind.</span></h2>
+          <p class="lede" x-text="isPublic
+            ? 'Paste a file or snippet. VibeAudit audits it for security, logic and quality bugs, double-checks what it finds and returns a ranked, graded report.'
+            : 'Point VibeAudit at a folder, a GitHub repo or a snippet. It maps the code, audits every file, double-checks what it finds and returns a ranked, graded report.'"></p>
+
+          <div class="panel pad">
+            <div class="seg" role="tablist" x-show="!isPublic">
+              <span class="ind" :style="'transform:translateX(' + (tabIndex*100) + '%)'"></span>
+              <button role="tab" :class="tab==='local' && 'on'" @click="tab='local'">
+                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><path d="M3 7a2 2 0 0 1 2-2h4l2 2h8a2 2 0 0 1 2 2v8a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2z"/></svg>Folder</button>
+              <button role="tab" :class="tab==='github' && 'on'" @click="tab='github'">
+                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"><circle cx="6" cy="6" r="2.3"/><circle cx="6" cy="18" r="2.3"/><circle cx="18" cy="8" r="2.3"/><path d="M6 8.3v7.4M18 10.3c0 4-6 3-11 6"/></svg>Repository</button>
+              <button role="tab" :class="tab==='paste' && 'on'" @click="tab='paste'">
+                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="m8 8-5 4 5 4M16 8l5 4-5 4"/></svg>Snippet</button>
+            </div>
+
+            <div x-show="tab==='local'">
+              <label class="label">Project folder <span class="k">absolute path</span></label>
+              <input class="field code" x-model="form.local" spellcheck="false" placeholder="C:\path\to\your\app" @keydown.enter="start()" />
+              <p class="hint">Read from the server's disk as text. Nothing is executed.</p>
+            </div>
+            <div x-show="tab==='github'">
+              <label class="label">Public GitHub repository</label>
+              <input class="field code" x-model="form.github" spellcheck="false" placeholder="https://github.com/user/repo" @keydown.enter="start()" />
+              <p class="hint">Shallow-cloned to a temp folder and deleted afterwards.</p>
+            </div>
+            <div x-show="tab==='paste'">
+              <label class="label">Paste code <input class="field code" style="width:150px;padding:5px 10px;font-size:12px;border-radius:8px" x-model="form.filename" placeholder="snippet.js" aria-label="File name" /></label>
+              <textarea class="field" x-model="form.paste" spellcheck="false" placeholder="// paste a file or snippet here" @keydown.ctrl.enter="start()" @keydown.meta.enter="start()"></textarea>
+              <div class="counter">
+                <span class="tnum" :class="overLimit && 'over'">
+                  <span x-text="snipLines.toLocaleString()"></span> / <span x-text="limits.max_snippet_lines.toLocaleString()"></span> lines ·
+                  <span x-text="(snipBytes/1000).toFixed(1)"></span> / <span x-text="(limits.max_snippet_bytes/1000).toFixed(0)"></span> KB
+                </span>
+                <button class="link-btn" type="button" @click="loadSample()">Try the sample</button>
+              </div>
+            </div>
+
+            <div class="depths" x-show="!isPublic">
+              <button class="depth" :class="form.depth==='quick' && 'on'" @click="form.depth='quick'">
+                <span class="radio"></span>
+                <div class="dt"><span class="ic"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linejoin="round"><path d="M13 2 4 14h7l-1 8 9-12h-7z"/></svg></span>Quick</div>
+                <div class="dd">Static + LLM audit with a verification pass.</div>
+              </button>
+              <button class="depth" :class="form.depth==='deep' && 'on'" @click="form.depth='deep'">
+                <span class="radio"></span>
+                <div class="dt"><span class="ic"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linejoin="round"><path d="m12 3 8 4.5v9L12 21l-8-4.5v-9z"/><path d="m4 7.5 8 4.5 8-4.5M12 12v9"/></svg></span>Deep</div>
+                <div class="dd">Also boots the app in a Docker sandbox.</div>
+              </button>
+            </div>
+
+            <button class="btn-primary run-btn" :style="isPublic && 'margin-top:18px'" @click="start()" :disabled="!cfg.configured || !inputValue.trim() || overLimit || starting">
+              <span x-text="starting ? 'Starting…' : 'Run audit'"></span>
+              <svg class="arr" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><path d="M5 12h14M13 6l6 6-6 6"/></svg>
+              <span class="kbd">Ctrl ↵</span>
+            </button>
+            <p class="form-error" x-show="formError" x-text="formError" role="alert"></p>
+            <div class="fine" x-show="isPublic">
+              <span x-show="limits.remaining_today !== undefined"><b class="tnum" x-text="limits.remaining_today"></b> of <span x-text="limits.per_day"></span> audits left today · <span x-text="limits.per_hour"></span> per hour each.</span>
+              Your code is sent to the model provider for analysis and isn't stored; reports expire after 24 hours. Don't paste real secrets.
+            </div>
+          </div>
+        </div>
+
+        <div class="core-slot" data-core>
+          <span class="tag-float" style="--c:var(--sev-critical);top:11%;left:0"><b>CWE-798</b>hardcoded secrets</span>
+          <span class="tag-float" style="--c:var(--sev-high);top:24%;right:-2%;animation-delay:-2.3s"><b>CWE-89</b>SQL injection</span>
+          <span class="tag-float" style="--c:var(--sev-medium);bottom:21%;left:-3%;animation-delay:-4.6s"><b>CWE-476</b>null access</span>
+          <span class="tag-float" style="--c:var(--sev-low);bottom:9%;right:4%;animation-delay:-1.2s"><b>CWE-362</b>race conditions</span>
+        </div>
+      </div>
+
+      <div class="pillars">
+        <template x-for="(p, i) in pillars" :key="p.t">
+          <div class="pillar" data-tilt>
+            <span class="glare"></span>
+            <div class="lift">
+              <div class="top"><div class="pi" x-html="p.i"></div><span class="idx" x-text="'0' + (i+1)"></span></div>
+              <h4 x-text="p.t"></h4>
+              <p x-text="p.d"></p>
+            </div>
+          </div>
+        </template>
+      </div>
+
+      <div class="recent" x-show="recent.length">
+        <div class="section-title"><span class="label-sm">Recent audits</span></div>
+        <div class="recent-grid">
+          <template x-for="r in recent.slice(0,6)" :key="r.scan_id">
+            <button class="rcard" data-tilt @click="openScan(r.scan_id)" :style="'--gc:'+gradeColor(r.risk_grade)">
+              <span class="glare"></span>
+              <span class="rgrade" x-text="r.risk_grade || '?'"></span>
+              <span style="min-width:0">
+                <div class="rname" x-text="r.name"></div>
+                <div class="rmeta"><span x-text="r.total"></span> findings · <span x-text="ago(r.created_at)"></span></div>
+              </span>
+              <span class="rarrow">→</span>
+            </button>
+          </template>
+        </div>
+      </div>
+    </section>
+
+    <!-- ============================ RUNNING ============================ -->
+    <section x-show="view==='running'" class="view">
+      <div class="run-head">
+        <div>
+          <span class="label-sm">Audit in progress</span>
+          <h3>Auditing <span class="serif" x-text="shortName(jobName)"></span></h3>
+          <span class="target" x-text="jobName"></span>
+        </div>
+        <button class="btn-ghost" @click="reset()">
+          <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round"><path d="M18 6 6 18M6 6l12 12"/></svg>Stop watching</button>
+      </div>
+
+      <div class="run-grid">
+        <div class="panel">
+          <ol class="pipeline">
+            <template x-for="(s,i) in visibleSteps" :key="s.id">
+              <li class="step" :class="'is-' + ss[s.id].status">
+                <div class="node">
+                  <span class="arc"></span>
+                  <span class="num" x-text="String(i+1).padStart(2,'0')"></span>
+                  <svg class="check" viewBox="0 0 24 24"><path d="M5 12.5l4.2 4.2L19 7"/></svg>
+                  <svg class="cross" viewBox="0 0 24 24"><path d="M7 7l10 10M17 7 7 17"/></svg>
+                </div>
+                <div style="min-width:0">
+                  <div class="step-title">
+                    <span x-text="s.title"></span>
+                    <span class="chip live" x-show="ss[s.id].status==='active'">Live</span>
+                    <span class="chip" x-show="ss[s.id].status==='skipped'">Skipped</span>
+                  </div>
+                  <div class="step-desc" x-text="ss[s.id].msg || s.desc" :title="ss[s.id].msg || s.desc"></div>
+                  <div class="mini" x-show="ss[s.id].status==='active' && ss[s.id].pct !== null"><div :style="'width:' + (ss[s.id].pct||0) + '%'"></div></div>
+                </div>
+                <div class="step-time" x-text="stepTime(s.id)"></div>
+              </li>
+            </template>
+          </ol>
+        </div>
+
+        <div>
+          <div class="ring-slot" data-core>
+            <svg class="ring" viewBox="0 0 100 100">
+              <defs>
+                <linearGradient id="ringGrad" x1="0" y1="0" x2="1" y2="1">
+                  <stop offset="0" stop-color="#f1e2c4"/><stop offset="1" stop-color="#a6865b"/>
+                </linearGradient>
+              </defs>
+              <circle class="ticks" cx="50" cy="50" r="48.6" stroke-dasharray="0.25 2.8" />
+              <circle class="bg" cx="50" cy="50" r="45.5" />
+              <circle class="fg" cx="50" cy="50" r="45.5" stroke-dasharray="285.9" :stroke-dashoffset="285.9 * (1 - overallPct/100)" />
+            </svg>
+            <div class="ring-center">
+              <div class="pct tnum"><span x-text="Math.round(overallPct)"></span><small>%</small></div>
+              <div class="now" x-text="activeTitle"></div>
+              <div class="el" x-text="fmtElapsed"></div>
+            </div>
+          </div>
+
+          <div class="stats">
+            <div class="stat"><div class="v" x-text="stats.files ?? '—'"></div><div class="label-sm">Files</div></div>
+            <div class="stat"><div class="v"><span x-text="stats.segDone ?? '—'"></span><small x-text="stats.units ? '/' + stats.units : ''"></small></div><div class="label-sm">Segments</div></div>
+            <div class="stat"><div class="v"><span x-ref="fcount" x-text="liveFindings"></span></div><div class="label-sm">Findings</div></div>
+            <div class="stat"><div class="v" x-text="stats.dropped ?? 0"></div><div class="label-sm">Filtered</div></div>
+          </div>
+
+          <div class="panel term">
+            <div class="term-head"><span class="label-sm">Live log</span><span class="dots"><i></i><i></i><i></i></span></div>
+            <div class="term-body" x-ref="logbox">
+              <template x-for="(l,i) in log" :key="i">
+                <div class="ln" :class="l.stage==='error' ? 'err' : (/WARNING|cut off|failed/i.test(l.message) ? 'warn' : '')">
+                  <span class="t" x-text="l.t"></span><span class="s" x-text="l.stage"></span><span class="m" x-text="l.message"></span>
+                </div>
+              </template>
+              <span class="caret"></span>
+            </div>
+          </div>
+        </div>
+      </div>
+    </section>
+
+    <!-- ============================ ERROR ============================ -->
+    <section x-show="view==='error'" class="view">
+      <div class="panel err-card">
+        <div class="err-ic"><svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="#2a0d0c" stroke-width="2.8" stroke-linecap="round"><path d="M7 7l10 10M17 7 7 17"/></svg></div>
+        <h3>The audit couldn't finish</h3>
+        <p x-text="error"></p>
+        <button class="btn-primary" @click="reset()">Try again</button>
+      </div>
+    </section>
+
+    <!-- ============================ RESULTS ============================ -->
+    <section x-show="view==='done' && result" class="view">
+      <template x-if="result">
+        <div>
+          <div class="panel res-hero" :style="'--gc:' + gradeColor(result.risk_grade)">
+            <div class="medal-slot" data-core @pointermove="coinTilt($event)" @pointerleave="coinTilt(null)">
+              <div class="coin-tilt" x-ref="coin">
+                <div class="coin">
+                  <template x-for="n in 7"><div class="layer" :style="'transform:translateZ(' + (n - 1) + 'px)'"></div></template>
+                  <div class="back"></div>
+                  <div class="face"><b x-text="result.risk_grade"></b></div>
+                </div>
+              </div>
+              <div class="medal-cap label-sm">Health grade</div>
+            </div>
+
+            <div style="min-width:0">
+              <span class="label-sm">Audit report</span>
+              <h3 class="res-name" x-text="result.input.name"></h3>
+              <div class="metas">
+                <span class="meta" x-text="result.input.kind"></span>
+                <span class="meta" x-show="fromCache" title="This exact snippet was audited recently, so the saved report was reused at no cost.">Reused recent report</span>
+                <span class="meta" x-text="result.depth + ' scan'"></span>
+                <span class="meta" x-show="result.triage && result.triage.app_type" x-text="result.triage && result.triage.app_type"></span>
+                <span class="meta tnum" x-show="result.timings && result.timings.total_s" x-text="(result.timings && result.timings.total_s) + 's'"></span>
+                <span class="meta ok" x-show="result.counts && result.counts.dropped_false_positives"><span x-text="result.counts && result.counts.dropped_false_positives"></span> false positives filtered</span>
+              </div>
+              <div class="sevbar" x-show="total">
+                <template x-for="(s, i) in sevOrder" :key="s">
+                  <div x-show="countSev(s)" :style="'flex:' + countSev(s) + ';background:' + sevColor(s) + ';animation-delay:' + (300 + i*90) + 'ms'"></div>
+                </template>
+              </div>
+              <p class="verdict" x-html="verdictText"></p>
+              <div class="metas" style="margin:14px 0 0" x-show="result.triage && result.triage.frameworks && result.triage.frameworks.length">
+                <template x-for="fw in (result.triage ? result.triage.frameworks : [])" :key="fw"><span class="meta mono" x-text="fw"></span></template>
+              </div>
+            </div>
+
+            <div>
+              <div class="gauge">
+                <svg viewBox="0 0 200 110">
+                  <defs><linearGradient id="gGrad" x1="0" x2="1"><stop offset="0" stop-color="#7fd1a7"/><stop offset="0.55" stop-color="#dfc173"/><stop offset="1" stop-color="#ef7f7a"/></linearGradient></defs>
+                  <path d="M14 100 A86 86 0 0 1 186 100" fill="none" stroke="rgba(255,255,255,0.06)" stroke-width="8" stroke-linecap="round"/>
+                  <path d="M14 100 A86 86 0 0 1 186 100" fill="none" stroke="url(#gGrad)" stroke-width="8" stroke-linecap="round" stroke-dasharray="270.2" :stroke-dashoffset="270.2 * (1 - gaugeVal/100)" style="transition:stroke-dashoffset 1500ms cubic-bezier(.23,1,.32,1)"/>
+                </svg>
+                <div class="v"><span x-text="Math.round(gaugeVal)"></span><span class="label-sm">Risk / 100</span></div>
+              </div>
+              <div class="actions">
+                <a class="btn-ghost" :href="exportUrl('html')" target="_blank" rel="noopener">Open HTML report ↗</a>
+                <div class="two">
+                  <a class="btn-ghost" :href="exportUrl('md')">Markdown</a>
+                  <a class="btn-ghost" :href="exportUrl('json')">JSON</a>
+                </div>
+                <button class="btn-primary" style="padding:11px 16px;font-size:13.5px" @click="reset()">New audit</button>
+              </div>
+            </div>
+          </div>
+
+          <div class="banner warn" x-show="failedSegs" style="margin-top:20px">
+            <b x-text="failedSegs + ' of ' + (result.counts && result.counts.total_segments) + ' code segment(s)'"></b> could not be audited by the LLM, so this report is <b>incomplete</b>. Re-run the audit, or set <code>ENABLE_THINKING=false</code> in <code>.env</code> for shorter replies.
+          </div>
+
+          <div class="tiles" x-show="total">
+            <template x-for="s in sevOrder" :key="s">
+              <button class="tile" data-tilt :class="filters.sev[s] ? 'on' : 'off'" :style="'--c:' + sevColor(s)" @click="filters.sev[s] = !filters.sev[s]" :title="'Show or hide ' + s + ' findings'">
+                <span class="glare"></span>
+                <span class="tick"><svg viewBox="0 0 24 24" fill="none" stroke-width="3" stroke-linecap="round" stroke-linejoin="round"><path d="M5 12.5l4.2 4.2L19 7"/></svg></span>
+                <div class="v" x-text="countSev(s)"></div>
+                <div class="l"><i></i><span x-text="s"></span></div>
+              </button>
+            </template>
+          </div>
+
+          <div class="toolbar" x-show="total">
+            <template x-for="c in catOrder" :key="c">
+              <button class="pill-btn" :class="filters.cat[c] && 'on'" @click="filters.cat[c] = !filters.cat[c]">
+                <span x-html="catIcon[c]"></span><span x-text="c"></span><span class="n" x-text="countCat(c)"></span>
+              </button>
+            </template>
+            <button class="pill-btn" :class="filters.verified && 'on'" @click="filters.verified = !filters.verified">
+              <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><path d="M5 12.5l4.2 4.2L19 7"/></svg>Verified only</button>
+            <div class="search-wrap">
+              <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><circle cx="11" cy="11" r="7"/><path d="m20 20-3.5-3.5"/></svg>
+              <input class="field" x-model="filters.q" placeholder="Search findings" />
+            </div>
+          </div>
+
+          <div class="findings">
+            <template x-for="(f, i) in visibleFindings" :key="f.id">
+              <div class="finding" :class="expanded[f.id] && 'open'" :style="'--c:' + sevColor(f.severity) + ';--i:' + Math.min(i, 14)">
+                <button class="fhead" @click="expanded[f.id] = !expanded[f.id]">
+                  <span class="fidx" x-text="String(i+1).padStart(2,'0')"></span>
+                  <span class="sev" x-text="f.severity"></span>
+                  <span style="flex:1;min-width:0">
+                    <div class="ftitle" x-text="f.title"></div>
+                    <div class="fmeta">
+                      <span style="text-transform:capitalize" x-text="f.category"></span>
+                      <span class="path" x-text="f.file + (f.line_start ? ':' + f.line_start : '')"></span>
+                      <span class="tnum"><span class="confbar"><i :style="'width:' + Math.round(f.confidence*100) + '%'"></i></span><span x-text="Math.round(f.confidence*100) + '%'"></span></span>
+                      <span x-show="f.cwe" x-text="f.cwe"></span>
+                      <span class="ok" x-show="f.verdict==='confirmed'">✓ Verified</span>
+                      <span x-show="f.verdict==='plausible'">Plausible</span>
+                      <span x-show="f.source && f.source!=='llm'" class="mono" x-text="f.source"></span>
+                    </div>
+                  </span>
+                  <span class="chev"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round"><path d="m9 6 6 6-6 6"/></svg></span>
+                </button>
+                <div class="fbody"><div>
+                  <div class="fdetail">
+                    <div x-show="f.description"><h6 class="label-sm">What's wrong</h6><span x-text="f.description"></span></div>
+                    <div x-show="f.impact"><h6 class="label-sm">Impact</h6><span x-text="f.impact"></span></div>
+                    <div class="fix" x-show="f.recommendation">
+                      <button class="copy" @click="copy(f.recommendation, f.id)" x-text="copied===f.id ? 'Copied' : 'Copy'"></button>
+                      <h6 class="label-sm">Suggested fix</h6><span x-text="f.recommendation"></span>
+                    </div>
+                    <pre x-show="f.code_snippet" x-text="f.code_snippet"></pre>
+                  </div>
+                </div></div>
+              </div>
+            </template>
+            <div class="panel empty" x-show="total && !visibleFindings.length">No findings match the current filters.</div>
+            <div class="panel clean" x-show="!total && !failedSegs"><b>Spotless.</b><span style="color:var(--ink-2)">No issues were found in this codebase.</span></div>
+          </div>
+        </div>
+      </template>
+    </section>
+
+    <!-- ============================ HOW IT WORKS ============================ -->
+    <section x-show="view==='how'" class="view">
+      <div class="hero">
+        <div class="stagger">
+          <span class="kicker"><i></i>How it works</span>
+          <h2>From pasted code to a <span class="serif">graded report.</span></h2>
+          <p class="lede" x-text="isPublic
+            ? 'VibeAudit combines a pattern scan with two passes of a large language model: one to find bugs, one to argue against them. Here is every step, what it costs and what happens to your code.'
+            : 'VibeAudit combines deterministic scanners, a large language model and (optionally) a Docker sandbox. Here is every step a scan goes through, what it costs and what happens to your code.'"></p>
+          <div class="stats how-facts">
+            <div class="stat"><div class="v">2</div><div class="label-sm">Model calls per snippet</div></div>
+            <div class="stat"><div class="v">~40<small>s</small></div><div class="label-sm">Typical snippet audit</div></div>
+            <div class="stat"><div class="v">0</div><div class="label-sm">Calls to repeat an audit</div></div>
+            <div class="stat"><div class="v" x-text="limits.max_snippet_lines"></div><div class="label-sm">Lines per snippet</div></div>
+          </div>
+        </div>
+        <div class="core-slot how-core" data-core></div>
+      </div>
+
+      <!-- Pipeline -->
+      <div class="how-sec">
+        <span class="kicker"><i></i>The pipeline</span>
+        <h3><span x-text="isPublic ? 'Seven' : 'Eight'"></span> steps, <span class="serif" x-text="isPublic ? 'two of them think.' : 'three of them think.'"></span></h3>
+        <p class="sub" x-text="isPublic
+          ? 'Most steps are plain code and cost nothing. Only the audit and the verification call the model. Pick a step to see what it does.'
+          : 'Most steps are plain code and cost nothing. Only triage, the audit and the verification call the model. Pick a step to see what it does.'"></p>
+
+        <div class="pipe">
+          <ol class="panel pipe-list" @keydown.arrow-down.prevent="howGo(howStep + 1, true)" @keydown.arrow-up.prevent="howGo(howStep - 1, true)">
+            <template x-for="(s, i) in howSteps" :key="s.id">
+              <li :class="i < howStep && 'past'">
+                <button class="pstep" :class="[i === howStep && 'on', i < howStep && 'past']" @click="howGo(i)" :aria-pressed="i === howStep" :id="'hs-' + i">
+                  <span class="pnode"><span x-text="i + 1"></span><svg viewBox="0 0 24 24"><path d="m6 12.5 4 4 8-9"/></svg></span>
+                  <span style="min-width:0">
+                    <span class="pt">
+                      <span x-text="s.t"></span>
+                      <span class="chip live" x-show="s.ai && !(isPublic && s.skipSnippet)">Model call</span>
+                      <span class="chip off" x-show="isPublic && s.skipSnippet">Skipped for snippets</span>
+                      <span class="chip" x-show="s.localOnly">Deep only</span>
+                    </span>
+                    <span class="pd" x-text="isPublic && s.ps ? s.ps : s.s"></span>
+                  </span>
+                </button>
+              </li>
+            </template>
+          </ol>
+
+          <div class="panel pdetail" x-ref="pdetail" aria-live="polite">
+            <template x-for="s in [howCur]" :key="s.id">
+              <div class="pin">
+                <span class="step-no" x-text="'Step ' + String(howStep + 1).padStart(2, '0') + ' of ' + String(howSteps.length).padStart(2, '0')"></span>
+                <h4 x-text="s.t"></h4>
+                <p x-text="isPublic && s.pub ? s.pub : s.loc"></p>
+                <p class="why"><b>Why: </b><span x-text="s.why"></span></p>
+                <div class="metas" style="margin:0">
+                  <span class="meta" :class="howFree(s) && 'ok'" x-text="howCost(s)"></span>
+                  <span class="meta" x-text="s.where"></span>
+                </div>
+                <div class="ex-label"><span class="label-sm" x-text="s.exLabel"></span></div>
+                <pre class="code-ex" x-text="s.ex"></pre>
+              </div>
+            </template>
+            <div class="pfoot">
+              <span class="label-sm" x-text="(howStep + 1) + ' / ' + howSteps.length"></span>
+              <div class="btns">
+                <button class="btn-ghost" @click="howGo(howStep - 1)" :disabled="howStep === 0" aria-label="Previous step">
+                  <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><path d="M19 12H5M11 6l-6 6 6 6"/></svg>Back</button>
+                <button class="btn-ghost" @click="howPlaying ? howStop() : howPlay()">
+                  <svg x-show="!howPlaying" viewBox="0 0 24 24" fill="currentColor"><path d="M7 5v14l12-7z"/></svg>
+                  <svg x-show="howPlaying" viewBox="0 0 24 24" fill="currentColor"><path d="M7 5h4v14H7zM13 5h4v14h-4z"/></svg>
+                  <span x-text="howPlaying ? 'Pause' : 'Play through'"></span></button>
+                <button class="btn-ghost" @click="howGo(howStep + 1)" :disabled="howStep === howSteps.length - 1" aria-label="Next step">Next
+                  <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><path d="M5 12h14M13 6l6 6-6 6"/></svg></button>
+              </div>
+            </div>
+          </div>
+        </div>
+      </div>
+
+      <!-- Grading -->
+      <div class="how-sec">
+        <span class="kicker"><i></i>Scoring</span>
+        <h3>How the <span class="serif">grade</span> is worked out.</h3>
+        <p class="sub">Every finding that survives verification adds to a risk score from 0 to 100. Severity sets the weight and the model's confidence scales it, so one solid critical counts for more than a pile of style nits.</p>
+
+        <div class="grade-grid">
+          <div class="panel pad">
+            <div class="formula">risk = Σ <span>weight</span>(severity) × <span>confidence</span><small>capped at 100 · confidence is 0–1</small></div>
+            <div class="weights">
+              <template x-for="w in weightsList" :key="w.s">
+                <div class="wrow" :style="'--c:' + sevColor(w.s)">
+                  <span class="sev" x-text="w.s"></span>
+                  <span class="bar"><i :style="'width:' + (w.w / 25 * 100) + '%'"></i></span>
+                  <span class="w" x-text="w.w"></span>
+                </div>
+              </template>
+            </div>
+            <ul class="grade-notes">
+              <li>Findings the verification pass rejects are removed before scoring.</li>
+              <li>Duplicates (same file and category, overlapping lines or near-identical titles) are merged, keeping the worst severity.</li>
+              <li>The list is ranked by severity, then confidence.</li>
+            </ul>
+          </div>
+
+          <div class="panel pad">
+            <span class="label-sm">Try it</span>
+            <p style="margin:6px 0 16px;font-size:13px;color:var(--ink-3)">Add findings to see the score and grade move. This assumes full confidence for each one.</p>
+            <div class="calc-rows">
+              <template x-for="s in ['critical','high','medium','low']" :key="s">
+                <div class="crow" :style="'--c:' + sevColor(s)">
+                  <span class="sev" x-text="s"></span>
+                  <span class="stepper">
+                    <button @click="calc[s] = Math.max(0, calc[s] - 1)" :disabled="!calc[s]" :aria-label="'Remove a ' + s + ' finding'">−</button>
+                    <output x-text="calc[s]"></output>
+                    <button @click="calc[s] = Math.min(9, calc[s] + 1)" :disabled="calc[s] >= 9" :aria-label="'Add a ' + s + ' finding'">+</button>
+                  </span>
+                </div>
+              </template>
+            </div>
+            <div class="calc-out" :style="'--gc:' + gradeColor(calcGrade)">
+              <span class="rgrade" x-text="calcGrade"></span>
+              <div>
+                <div class="score"><span x-text="calcScore"></span><small>/ 100 risk</small></div>
+                <div class="gl" x-text="gradeLabel(calcGrade)"></div>
+              </div>
+            </div>
+            <div class="scale">
+              <template x-for="b in gradeBands" :key="b.g"><div :style="'flex:' + b.w + ';--c:' + gradeColor(b.g)"></div></template>
+              <span class="marker" :style="'left:' + Math.max(0.8, Math.min(99.2, calcScore)) + '%'"></span>
+            </div>
+            <div class="scale-labels">
+              <template x-for="b in gradeBands" :key="b.g"><span :style="'flex:' + b.w" :title="'Grade ' + b.g + ': risk ' + b.r" x-text="b.g"></span></template>
+            </div>
+          </div>
+        </div>
+      </div>
+
+      <!-- What it checks -->
+      <div class="how-sec">
+        <span class="kicker"><i></i>Coverage</span>
+        <h3>What it <span class="serif">looks for.</span></h3>
+        <p class="sub">Every audit covers three areas and asks for specific bugs with a line number and a fix, tagged with a CWE where one applies. Typical finds:</p>
+        <div class="check-grid">
+          <template x-for="(c, i) in coverage" :key="c.t">
+            <div class="pillar" data-tilt>
+              <span class="glare"></span>
+              <div class="lift">
+                <div class="top"><div class="pi" x-html="c.i"></div><span class="idx" x-text="'0' + (i+1)"></span></div>
+                <h4 x-text="c.t" style="margin-bottom:14px"></h4>
+                <ul><template x-for="item in c.items" :key="item"><li x-text="item"></li></template></ul>
+              </div>
+            </div>
+          </template>
+        </div>
+      </div>
+
+      <!-- Privacy & limits -->
+      <div class="how-sec">
+        <span class="kicker"><i></i>Privacy &amp; limits</span>
+        <h3>What happens to <span class="serif">your code.</span></h3>
+        <p class="sub" x-text="isPublic
+          ? 'This is a shared demo that pays for every model call, so it only takes snippets and has limits. Here is exactly what is kept and for how long.'
+          : 'This instance is running in local mode on your own machine. Here is what is kept and where it goes.'"></p>
+        <div class="two-col">
+          <div class="panel pad">
+            <h4><span class="pi" x-html="icons.shield"></span>Your code</h4>
+            <ul class="plist">
+              <li>The code is written to a temporary folder for the scan and <b>deleted when it ends</b>. Only the report is saved.</li>
+              <li><b>It is sent to the model provider</b> (<span class="mono" style="font-size:12px" x-text="shortModel || 'the configured model'"></span>) for analysis. Don't paste real secrets.</li>
+              <li>Secrets found in your code are <b>masked in the report</b>, for example <span class="mono" style="font-size:12px">sk_l***tUs3</span>.</li>
+              <li>Each report has a long random ID, so <b>only people with the link</b> can open it.</li>
+              <li x-show="isPublic">Reports are <b>deleted after 24 hours</b>. Your history is kept only in this browser.</li>
+              <li x-show="!isPublic">Reports are kept in a local SQLite file, <span class="mono" style="font-size:12px">data/vibeaudit.db</span>.</li>
+            </ul>
+          </div>
+          <div class="panel pad">
+            <h4><span class="pi" x-html="icons.bolt"></span>Limits</h4>
+            <ul class="plist">
+              <li>Up to <b x-text="limits.max_snippet_lines + ' lines'"></b> or <b x-text="Math.round(limits.max_snippet_bytes / 1000) + ' KB'"></b> per snippet.</li>
+              <template x-if="isPublic">
+                <li><b x-text="limits.per_hour + ' audits an hour'"></b> per visitor and <b x-text="limits.per_day + ' a day'"></b> across everyone<span x-show="limits.remaining_today !== undefined" x-text="' (' + limits.remaining_today + ' left today)'"></span>.</li>
+              </template>
+              <li x-show="isPublic">Only a couple of audits run at once. If it's busy, you'll be asked to retry in a minute.</li>
+              <li>Pasting the <b>same snippet again</b> within 24 hours returns the saved report instantly, with no model calls and no quota used.</li>
+              <li x-show="isPublic">Folders, GitHub repos and the Docker sandbox are <b>only available when you run VibeAudit yourself</b>, because they would read files or run code on the server.</li>
+              <li x-show="!isPublic">Local mode has <b>no hourly or daily limits</b>, and adds folders, GitHub repos and the Deep (Docker) scan.</li>
+            </ul>
+          </div>
+        </div>
+      </div>
+
+      <!-- Limitations -->
+      <div class="how-sec">
+        <span class="kicker"><i></i>Good to know</span>
+        <h3>What it <span class="serif">can't</span> promise.</h3>
+        <div class="panel pad" style="margin-top:22px">
+          <ul class="plist warn">
+            <li><b>It can be wrong.</b> The verification pass cuts false positives, but treat every finding as a lead to check, not a verdict.</li>
+            <li><b>Results vary a little between runs.</b> Language models aren't deterministic, so a re-run can surface a different low-severity finding.</li>
+            <li><b>A clean grade isn't a security sign-off.</b> It means nothing obvious was found in the code it saw, not that the code is safe.</li>
+            <li><b>It only sees what you paste.</b> A snippet has no access to the rest of your project, so bugs that depend on other files can be missed.</li>
+            <li x-show="isPublic"><b>Nothing is executed.</b> This demo reads code; it never runs it, so crashes that only show up at runtime are out of scope.</li>
+            <li><b>If the model fails, you'll know.</b> When no code could be checked the scan ends in an error instead of a clean grade, and partly checked reports are marked incomplete.</li>
+          </ul>
+        </div>
+      </div>
+
+      <div class="panel cta">
+        <h3>See it on <span class="serif">real code.</span></h3>
+        <p>The sample is a small Express API with about a dozen planted bugs: injection, broken auth, leaked keys and a checkout that always charges $0.</p>
+        <div class="row">
+          <button class="btn-primary" @click="reset(); loadSample()">Try the sample
+            <svg class="arr" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><path d="M5 12h14M13 6l6 6-6 6"/></svg></button>
+          <button class="btn-ghost" style="padding:13px 18px" @click="reset()">Paste your own code</button>
+        </div>
+      </div>
+    </section>
+  </main>
+
+  <footer class="foot">VibeAudit · LLM-assisted analysis can be wrong. Verify findings before acting on them.</footer>
+</div>
+
+<script>
+/* ======================================================================
+   3D scene: a lit, faceted obsidian gem with fine orbits. It follows the
+   [data-core] slot of whichever view is visible and reacts to scan state.
+   ====================================================================== */
+const VA3D = (() => {
+  const stub = { setMode() {}, setTint() {}, pulse() {}, burst() {} };
+  if (!window.THREE) return stub;
+  const reduce = matchMedia('(prefers-reduced-motion: reduce)').matches;
+  const canvas = document.getElementById('stage');
+  let renderer;
+  try { renderer = new THREE.WebGLRenderer({ canvas, antialias: true, alpha: true }); } catch (e) { return stub; }
+  renderer.setPixelRatio(Math.min(devicePixelRatio || 1, 2));
+  renderer.outputEncoding = THREE.sRGBEncoding;
+  const scene = new THREE.Scene();
+  const camera = new THREE.PerspectiveCamera(38, 1, 0.1, 200);
+  camera.position.set(0, 0, 15);
+  const ADD = THREE.AdditiveBlending;
+  const ACCENT = new THREE.Color('#d6b98c');
+
+  // Sparse star dust
+  const N = 650, sp = new Float32Array(N * 3);
+  for (let i = 0; i < N; i++) {
+    const r = 20 + Math.random() * 40, th = Math.random() * Math.PI * 2, ph = Math.acos(2 * Math.random() - 1);
+    sp.set([r * Math.sin(ph) * Math.cos(th), r * Math.sin(ph) * Math.sin(th), r * Math.cos(ph) - 25], i * 3);
+  }
+  const starGeo = new THREE.BufferGeometry(); starGeo.setAttribute('position', new THREE.BufferAttribute(sp, 3));
+  const stars = new THREE.Points(starGeo, new THREE.PointsMaterial({ color: 0xffffff, size: 0.07, transparent: true, opacity: 0.32, depthWrite: false }));
+  scene.add(stars);
+
+  // Soft sprite texture
+  const gc = document.createElement('canvas'); gc.width = gc.height = 128;
+  const g = gc.getContext('2d'); const rg = g.createRadialGradient(64, 64, 0, 64, 64, 64);
+  rg.addColorStop(0, 'rgba(255,255,255,1)'); rg.addColorStop(0.3, 'rgba(255,255,255,0.28)'); rg.addColorStop(1, 'rgba(255,255,255,0)');
+  g.fillStyle = rg; g.fillRect(0, 0, 128, 128);
+  const glowTex = new THREE.CanvasTexture(gc);
+
+  // Lights (world space: direction stays constant as the gem moves between views)
+  scene.add(new THREE.AmbientLight(0x9a9aa8, 0.08));
+  const key = new THREE.DirectionalLight(0xf3dcb5, 1.25); key.position.set(-4, 5, 6); scene.add(key);
+  const fill = new THREE.DirectionalLight(0xa9b8e8, 0.3); fill.position.set(5, -2, 4); scene.add(fill);
+  const rim = new THREE.DirectionalLight(0xffffff, 0.9); rim.position.set(2, 3, -6); scene.add(rim);
+  const keyBase = new THREE.Color(0xf3dcb5), keyTint = new THREE.Color(0xf3dcb5), keyCol = key.color;
+
+  const root = new THREE.Group(); scene.add(root);
+  const gemGroup = new THREE.Group(); root.add(gemGroup);
+
+  const gemGeo = new THREE.IcosahedronGeometry(1.3, 1);
+  const gemMat = new THREE.MeshPhongMaterial({ color: 0x040405, specular: 0xb59a6e, shininess: 140, flatShading: true });
+  const gem = new THREE.Mesh(gemGeo, gemMat); gemGroup.add(gem);
+  const edgeMat = new THREE.LineBasicMaterial({ color: 0xffffff, transparent: true, opacity: 0.09, depthWrite: false });
+  gemGroup.add(new THREE.LineSegments(new THREE.EdgesGeometry(new THREE.IcosahedronGeometry(1.302, 1)), edgeMat));
+  const coreGlow = new THREE.Sprite(new THREE.SpriteMaterial({ map: glowTex, color: ACCENT, transparent: true, opacity: 0.16, blending: ADD, depthWrite: false }));
+  coreGlow.scale.set(6.5, 6.5, 1); coreGlow.position.z = -1.2; root.add(coreGlow);
+
+  // Fine particle shell
+  const shellMat = new THREE.PointsMaterial({ color: 0xffffff, size: 0.02, transparent: true, opacity: 0.32, depthWrite: false });
+  const shell = new THREE.Points(new THREE.IcosahedronGeometry(1.8, 4), shellMat); root.add(shell);
+
+  // Orbits
+  const rings = [];
+  [[2.25, 1.25, 0.25, 0.55, ACCENT, 0.42], [2.6, -0.45, 1.0, -0.38, new THREE.Color('#ffffff'), 0.16], [1.98, 0.3, -1.1, 0.8, new THREE.Color('#ffffff'), 0.1]].forEach(([r, rx, rz, sp, col, op]) => {
+    const pivot = new THREE.Group(); pivot.rotation.set(rx, 0, rz);
+    const mat = new THREE.MeshBasicMaterial({ color: col, transparent: true, opacity: op, depthWrite: false });
+    pivot.add(new THREE.Mesh(new THREE.TorusGeometry(r, 0.0045, 6, 240), mat));
+    const sat = new THREE.Mesh(new THREE.SphereGeometry(0.045, 16, 16), new THREE.MeshBasicMaterial({ color: 0xffffff }));
+    const halo = new THREE.Sprite(new THREE.SpriteMaterial({ map: glowTex, color: col, blending: ADD, transparent: true, opacity: 0.8, depthWrite: false }));
+    halo.scale.set(0.45, 0.45, 1); sat.add(halo); pivot.add(sat); root.add(pivot);
+    rings.push({ pivot, sat, r, sp, a: Math.random() * 6, mat, op });
+  });
+
+  // Scanner slice (horizontal light ring passing through the gem)
+  const sliceMat = new THREE.MeshBasicMaterial({ color: ACCENT, transparent: true, opacity: 0, side: THREE.DoubleSide, blending: ADD, depthWrite: false });
+  const slice = new THREE.Mesh(new THREE.RingGeometry(1.42, 1.47, 160), sliceMat);
+  slice.rotation.x = Math.PI / 2; root.add(slice);
+  const sliceGlow = new THREE.Mesh(new THREE.RingGeometry(0.2, 1.42, 96), new THREE.MeshBasicMaterial({ color: ACCENT, transparent: true, opacity: 0, side: THREE.DoubleSide, blending: ADD, depthWrite: false }));
+  sliceGlow.rotation.x = Math.PI / 2; root.add(sliceGlow);
+
+  // Shockwaves + burst
+  const waves = [];
+  function pulse(hex) {
+    const m = new THREE.MeshBasicMaterial({ color: new THREE.Color(hex || '#d6b98c'), transparent: true, opacity: 0.6, side: THREE.DoubleSide, blending: ADD, depthWrite: false });
+    const w = new THREE.Mesh(new THREE.RingGeometry(1.5, 1.52, 160), m);
+    root.add(w); waves.push({ w, t: 0 }); kick = 1;
+  }
+  let burstPts = null, burstV = null, burstT = 0;
+  function burst(hex) {
+    if (reduce) return;
+    if (burstPts) { root.remove(burstPts); burstPts.geometry.dispose(); }
+    const n = 260, pos = new Float32Array(n * 3); burstV = new Float32Array(n * 3);
+    for (let i = 0; i < n; i++) {
+      const v = new THREE.Vector3(Math.random() - .5, Math.random() - .5, Math.random() - .5).normalize();
+      const s = 0.03 + Math.random() * 0.06; burstV.set([v.x * s, v.y * s, v.z * s], i * 3);
+    }
+    const geo = new THREE.BufferGeometry(); geo.setAttribute('position', new THREE.BufferAttribute(pos, 3));
+    burstPts = new THREE.Points(geo, new THREE.PointsMaterial({ color: new THREE.Color(hex), size: 0.04, transparent: true, opacity: 0.9, blending: ADD, depthWrite: false }));
+    root.add(burstPts); burstT = 0; pulse(hex);
+  }
+
+  let mode = 'idle', speed = 1, speedT = 1, kick = 0, sliceT = 0;
+  const mouse = { x: 0, y: 0, sx: 0, sy: 0 };
+  addEventListener('pointermove', e => { mouse.x = e.clientX / innerWidth - 0.5; mouse.y = e.clientY / innerHeight - 0.5; }, { passive: true });
+  function resize() { renderer.setSize(innerWidth, innerHeight, false); camera.aspect = innerWidth / innerHeight; camera.updateProjectionMatrix(); }
+  addEventListener('resize', resize); resize();
+
+  const tmp = new THREE.Vector3(), posT = new THREE.Vector3(); let scaleT = 1, visT = 1, vis = 0;
+  function follow() {
+    let el = null;
+    for (const e of document.querySelectorAll('[data-core]')) if (e.offsetParent !== null) { el = e; break; }
+    if (!el) { visT = 0; return; }
+    const r = el.getBoundingClientRect();
+    tmp.set(((r.left + r.width / 2) / innerWidth) * 2 - 1, -((r.top + r.height / 2) / innerHeight) * 2 + 1, 0.5).unproject(camera).sub(camera.position).normalize();
+    posT.copy(camera.position).add(tmp.multiplyScalar(-camera.position.z / tmp.z));
+    const worldPerPx = 2 * Math.tan(THREE.MathUtils.degToRad(camera.fov / 2)) * camera.position.z / innerHeight;
+    scaleT = Math.max(0.3, (Math.min(r.width, r.height) / 2) * worldPerPx / 2.75);
+    visT = (r.bottom < -100 || r.top > innerHeight + 100) ? 0 : 1;
+  }
+
+  let last = performance.now(), first = true;
+  function frame(now) {
+    requestAnimationFrame(frame);
+    if (document.hidden) return;
+    const dt = Math.min(0.05, (now - last) / 1000); last = now;
+    const m = reduce ? 0.12 : 1;
+    follow();
+    if (first) { root.position.copy(posT); root.scale.setScalar(scaleT); first = false; }
+    root.position.lerp(posT, 0.1);
+    root.scale.setScalar(root.scale.x + (scaleT * (1 + kick * 0.05) - root.scale.x) * 0.1);
+    vis += (visT - vis) * 0.08; kick *= 0.93;
+    speed += (speedT - speed) * 0.035;
+    keyCol.lerp(keyTint, 0.03);
+
+    mouse.sx += (mouse.x - mouse.sx) * 0.045; mouse.sy += (mouse.y - mouse.sy) * 0.045;
+    gem.rotation.y += dt * 0.22 * speed * m;
+    gem.rotation.x += dt * 0.05 * speed * m;
+    gemGroup.children[1].rotation.copy(gem.rotation);
+    gemGroup.rotation.x = mouse.sy * 0.5; gemGroup.rotation.y = mouse.sx * 0.6;
+    shell.rotation.y -= dt * 0.04 * speed * m; shell.rotation.x = mouse.sy * 0.2;
+    root.rotation.y = mouse.sx * 0.25; root.rotation.x = mouse.sy * 0.15;
+
+    const scanning = mode === 'scan';
+    key.intensity = (scanning ? 1.15 + Math.sin(now / 420) * 0.35 : 1.25) * vis;
+    rim.intensity = 0.9 * vis; fill.intensity = 0.3 * vis;
+    gemMat.opacity = vis; gemMat.transparent = vis < 0.99;
+    edgeMat.opacity = 0.13 * vis; shellMat.opacity = (scanning ? 0.45 : 0.32) * vis;
+    coreGlow.material.opacity = (0.14 + kick * 0.2 + (scanning ? 0.06 : 0)) * vis;
+    rings.forEach(r => {
+      r.a += dt * r.sp * speed * m; r.sat.position.set(Math.cos(r.a) * r.r, Math.sin(r.a) * r.r, 0);
+      r.pivot.rotation.y += dt * 0.04 * speed * m; r.mat.opacity = r.op * vis; r.sat.visible = vis > 0.2;
+    });
+
+    sliceT += dt * m;
+    sliceMat.opacity += ((scanning ? 0.75 : 0) * vis - sliceMat.opacity) * 0.06;
+    sliceGlow.material.opacity = sliceMat.opacity * 0.12;
+    const y = Math.sin(sliceT * 1.3) * 1.25;
+    slice.position.y = sliceGlow.position.y = y;
+    const k = Math.sqrt(Math.max(0.04, 1 - (y / 1.47) ** 2)); slice.scale.set(k, k, 1); sliceGlow.scale.set(k, k, 1);
+
+    for (let i = waves.length - 1; i >= 0; i--) {
+      const w = waves[i]; w.t += dt;
+      const s = 1 + w.t * 2.4; w.w.scale.set(s, s, 1); w.w.quaternion.copy(camera.quaternion);
+      w.w.material.opacity = Math.max(0, 0.6 - w.t * 0.55) * vis;
+      if (w.t > 1.2) { root.remove(w.w); w.w.geometry.dispose(); w.w.material.dispose(); waves.splice(i, 1); }
+    }
+    if (burstPts) {
+      burstT += dt; const p = burstPts.geometry.attributes.position.array;
+      for (let i = 0; i < p.length; i++) { p[i] += burstV[i]; burstV[i] *= 0.962; }
+      burstPts.geometry.attributes.position.needsUpdate = true;
+      burstPts.material.opacity = Math.max(0, 0.9 - burstT / 2.6);
+      if (burstT > 2.7) { root.remove(burstPts); burstPts.geometry.dispose(); burstPts = null; }
+    }
+    stars.rotation.y += dt * 0.004 * m;
+    camera.position.x = mouse.sx * 0.5; camera.position.y = -mouse.sy * 0.35; camera.lookAt(0, 0, 0);
+    renderer.render(scene, camera);
+  }
+  requestAnimationFrame(frame);
+
+  return {
+    setMode(m) { mode = m; speedT = m === 'scan' ? 3.4 : m === 'done' ? 0.7 : 1; if (m !== 'done') keyTint.copy(keyBase); },
+    setTint(hex) { keyTint.copy(keyBase).lerp(new THREE.Color(hex), 0.45); },
+    pulse, burst,
+  };
+})();
+
+/* ======================================================================
+   Pointer-driven 3D tilt for [data-tilt]
+   ====================================================================== */
+(() => {
+  if (!matchMedia('(hover: hover) and (pointer: fine)').matches || matchMedia('(prefers-reduced-motion: reduce)').matches) return;
+  let cur = null;
+  const clear = el => { el.classList.remove('tilting'); el.style.setProperty('--rx', '0deg'); el.style.setProperty('--ry', '0deg'); };
+  addEventListener('pointermove', e => {
+    const el = e.target.closest && e.target.closest('[data-tilt]');
+    if (cur && cur !== el) { clear(cur); cur = null; }
+    if (!el) return;
+    cur = el; el.classList.add('tilting');
+    const r = el.getBoundingClientRect(), x = (e.clientX - r.left) / r.width, y = (e.clientY - r.top) / r.height;
+    const max = r.width > 300 ? 5 : 8;
+    el.style.setProperty('--ry', ((x - 0.5) * max * 2).toFixed(2) + 'deg');
+    el.style.setProperty('--rx', ((0.5 - y) * max * 2).toFixed(2) + 'deg');
+    el.style.setProperty('--mx', (x * 100).toFixed(1) + '%');
+    el.style.setProperty('--my', (y * 100).toFixed(1) + '%');
+  }, { passive: true });
+  document.addEventListener('pointerleave', () => { if (cur) { clear(cur); cur = null; } });
+})();
+
+/* ======================================================================
+   App state (Alpine)
+   ====================================================================== */
+const STEPS = [
+  { id: 'ingest',        title: 'Reading input',          desc: 'Loading the folder, repository or snippet' },
+  { id: 'map',           title: 'Mapping the codebase',   desc: 'Discovering, filtering and chunking files' },
+  { id: 'deterministic', title: 'Deterministic scanners', desc: 'Secrets, bandit and semgrep pre-pass' },
+  { id: 'triage',        title: 'Understanding the app',  desc: 'Stack, risk areas and hotspots' },
+  { id: 'analyze',       title: 'Deep code audit',        desc: 'Security, logic and quality, file by file' },
+  { id: 'verify',        title: 'Verifying findings',     desc: 'Second pass to drop false positives' },
+  { id: 'dynamic',       title: 'Runtime sandbox',        desc: 'Booting the app in Docker to catch crashes', deepOnly: true },
+  { id: 'aggregate',     title: 'Ranking & grading',      desc: 'De-duplicating and scoring every issue' },
+  { id: 'done',          title: 'Report ready',           desc: 'Your graded audit is assembled' },
+];
+const STEP_IDS = STEPS.map(s => s.id);
+const ICON = {
+  shield: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"><path d="M12 3 4.5 6v6c0 4.6 3.2 7.8 7.5 9 4.3-1.2 7.5-4.4 7.5-9V6z"/><path d="m9 12 2 2 4-4"/></svg>',
+  bolt: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"><path d="M13 2 4 14h7l-1 8 9-12h-7z"/></svg>',
+  target: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round"><circle cx="12" cy="12" r="8.5"/><circle cx="12" cy="12" r="4.5"/><circle cx="12" cy="12" r="0.8" fill="currentColor"/></svg>',
+};
+
+/* "How it works" page content. `pub` replaces `loc` in public mode when present. */
+const HOW_STEPS = [
+  { id: 'ingest', t: 'Read the input', s: 'Load the snippet, folder or repository', ps: 'Save the snippet to a temporary folder', ai: false, cost: 'No model call', where: 'Runs on the server',
+    pub: 'Your snippet is saved under the file name you give it, in a private temporary folder that exists only for this scan. The folder is deleted when the scan ends, whatever the outcome.',
+    loc: 'A snippet goes to a temporary folder. A local folder is read from disk as plain text, and a public GitHub repository is shallow-cloned into a temporary folder. Temporary copies are deleted when the scan ends. Nothing is executed here.',
+    why: 'Every input becomes an ordinary folder of files, so the rest of the pipeline treats a snippet and a whole repository the same way.',
+    exLabel: 'Example · the sample', ex: 'input   paste · server.js\nsize    89 lines · 2.2 KB\nlimit   400 lines · 20 KB   ✓' },
+  { id: 'map', t: 'Map the files', s: 'Find the code worth reading, split big files', ps: 'Detect the language, split long snippets', ai: false, cost: 'No model call', where: 'Runs on the server',
+    pub: 'The language is detected from the file name and contents. A snippet of up to 350 lines is read as one segment; a longer one is split into two overlapping segments.',
+    loc: 'Walks the files, skips dependencies, build output, lock files and binaries, detects each language and ranks files by how likely they are to matter. Files over 350 lines are split into overlapping segments, up to 40 files and 6 segments per file.',
+    why: 'The model reads best in focused chunks. The 30-line overlap means a bug that straddles a boundary is still seen whole.',
+    exLabel: 'Example · the sample', ex: 'server.js   javascript   89 lines\nsegments    1   (lines 1–89)' },
+  { id: 'deterministic', t: 'Pattern scan', s: 'Catch leaked keys without a model', ai: false, cost: 'No model call', where: 'Runs on the server',
+    loc: 'Regular expressions look for credentials: AWS, Stripe, OpenAI, GitHub, Google, Slack and NVIDIA keys, JSON Web Tokens and private-key blocks. When installed, bandit (Python) and semgrep add rule-based security checks.',
+    why: 'Leaked keys follow fixed formats, so a pattern finds them faster and more reliably than a model. The key is masked before it reaches the report.',
+    exLabel: 'Example · the sample', ex: 'CRITICAL  Stripe/OpenAI-style secret key\n          server.js:10   sk_l***tUs3' },
+  { id: 'triage', t: 'Understand the app', s: 'Stack, entry points and risk areas', ai: true, skipSnippet: true, cost: '1 model call per scan', where: 'Model provider',
+    pub: 'Skipped for snippets. Instead of a separate call, the audit returns a short profile of the code (what it is and which libraries it uses) along with its findings. That saves one model call per scan.',
+    loc: 'One model call reads the file tree, manifests such as package.json and the start of key files, then describes the app: what it is, its frameworks, how it runs and where bugs are most likely to hide. The audit uses this profile as context. Snippets skip this call: the audit returns the profile instead.',
+    why: 'An audit that knows "this is an Express API using MySQL and JWTs" asks better questions than one reading code cold.',
+    exLabel: 'Example · profile of the sample', ex: '{\n  "app_type": "Express.js REST API server",\n  "frameworks": ["express", "mysql", "jsonwebtoken", "child_process"]\n}' },
+  { id: 'analyze', t: 'Audit the code', s: 'Security, logic and quality in one pass', ai: true, cost: '1 model call per segment', where: 'Model provider',
+    loc: 'The model gets the numbered code plus the app profile and must answer in structured JSON: a title, severity, category, exact lines, CWE, confidence, impact and a concrete fix for every bug. If a reply is cut off, every complete finding is kept; if it can\'t be parsed, the call is retried once.',
+    why: 'Asking for exact lines and a fix forces specific, checkable claims instead of generic advice.',
+    exLabel: 'Example · one finding from the sample', ex: '{\n  "title": "SQL injection in login endpoint",\n  "severity": "critical",\n  "category": "security",\n  "line_start": 22,\n  "cwe": "CWE-89",\n  "confidence": 1.0,\n  "recommendation": "Use parameterized queries ..."\n}' },
+  { id: 'verify', t: 'Verify findings', s: 'A sceptical second look at serious issues', ai: true, cost: '1 model call per file', where: 'Model provider',
+    loc: 'Every high and critical finding from the model is re-checked against the actual code by a second prompt whose job is to disprove it. All findings in a file are checked in one call. Each gets a verdict (confirmed, uncertain or dropped), and dropped ones never reach the report.',
+    why: 'Models over-report. A pass that argues the other side removes most false alarms before they cost you time.',
+    exLabel: 'Example · reply shape', ex: '{"verdicts": [\n  {"id": "f1", "verdict": "confirmed", "confidence": 1.0,\n   "reason": "username is interpolated into the SQL string"},\n  {"id": "f7", "verdict": "dropped", "confidence": 0.2,\n   "reason": "the value is validated two lines earlier"}\n]}' },
+  { id: 'dynamic', t: 'Runtime sandbox', s: 'Boot the app in Docker', ai: false, localOnly: true, cost: 'No model call', where: 'Docker on your machine',
+    loc: 'Deep scans only. The app is built and started in a Docker container and its HTTP routes are probed. When Playwright is installed, a headless browser loads the pages to catch console errors and uncaught exceptions. Build and boot failures become findings too.',
+    why: 'Some bugs only exist when the code runs: a crash on start-up, a missing environment variable, a page that throws in the browser.',
+    exLabel: 'Example · illustrative', ex: 'docker build   ✓\nboot           ✓  listening on :3000\nGET /          500  TypeError: Cannot read properties of undefined' },
+  { id: 'aggregate', t: 'Rank and grade', s: 'Merge duplicates, score, report', ai: false, cost: 'No model call', where: 'Runs on the server',
+    loc: 'Duplicate findings are merged, everything is ranked by severity and confidence, and a 0–100 risk score becomes a grade from A to F (see Scoring below). The report can be exported as JSON, Markdown or HTML.',
+    why: 'One ranked list means you fix the worst thing first.',
+    exLabel: 'Example · the sample\'s report', ex: 'grade F · risk 100 / 100\n6 critical · 2 high · 4 medium · 0 low\n1 false positive filtered' },
+];
+const COVERAGE = [
+  { t: 'Security', i: ICON.shield, items: ['SQL, command and path injection', 'Missing or broken auth checks', 'Hard-coded keys and secrets', 'XSS and unsafe HTML', 'Insecure defaults and CORS'] },
+  { t: 'Logic & runtime', i: ICON.bolt, items: ['Missing awaits and async misuse', 'Null and undefined access', 'Unhandled errors and rejections', 'Race conditions', 'Wrong conditions and off-by-ones'] },
+  { t: 'Correctness & quality', i: ICON.target, items: ['API and library misuse', 'Data-loss risks', 'Type coercion surprises', 'Performance footguns', 'Dead or unreachable code'] },
+];
+
+// Deliberately buggy Express API (also in fixtures/snippets/express-api.js).
+const SAMPLE = "const express = require(\"express\");\nconst mysql = require(\"mysql\");\nconst { exec } = require(\"child_process\");\nconst jwt = require(\"jsonwebtoken\");\n\nconst app = express();\napp.use(express.json());\n\nconst JWT_SECRET = \"supersecret123\";\nconst STRIPE_KEY = \"sk_live_FAKE_EXAMPLE_KEY_0000\";\n\nconst db = mysql.createConnection({\n  host: \"localhost\",\n  user: \"root\",\n  password: \"admin123\",\n  database: \"shop\",\n});\n\n// Login\napp.post(\"/login\", (req, res) => {\n  const { username, password } = req.body;\n  const sql = `SELECT * FROM users WHERE username = '${username}' AND password = '${password}'`;\n  db.query(sql, (err, rows) => {\n    if (rows.length > 0) {\n      const token = jwt.sign({ id: rows[0].id, role: rows[0].role }, JWT_SECRET);\n      res.json({ token });\n    } else {\n      res.status(401).send(\"Invalid login\");\n    }\n  });\n});\n\nfunction auth(req, res, next) {\n  const token = req.headers.authorization;\n  const user = jwt.decode(token);\n  req.user = user;\n  next();\n}\n\n// Admin: delete any user\napp.delete(\"/users/:id\", auth, (req, res) => {\n  db.query(\"DELETE FROM users WHERE id = \" + req.params.id);\n  res.send(\"deleted\");\n});\n\n// Search products\napp.get(\"/search\", (req, res) => {\n  const q = req.query.q;\n  res.send(`<h1>Results for ${q}</h1>`);\n});\n\n// Export a report\napp.get(\"/export\", auth, (req, res) => {\n  exec(\"zip -r /tmp/report.zip \" + req.query.folder, (err, out) => {\n    res.download(\"/tmp/report.zip\");\n  });\n});\n\n// Checkout\napp.post(\"/checkout\", auth, async (req, res) => {\n  const items = req.body.items;\n  let total = 0;\n  items.forEach(async (item) => {\n    const price = await getPrice(item.id);\n    total += price * item.qty;\n  });\n  if (req.body.coupon == \"FREE\") total = 0;\n  res.json({ charged: total });\n});\n\nasync function getPrice(id) {\n  return new Promise((resolve) => {\n    db.query(\"SELECT price FROM products WHERE id = ?\", [id], (err, rows) => {\n      resolve(rows[0].price);\n    });\n  });\n}\n\n// Paginated orders\napp.get(\"/orders\", auth, (req, res) => {\n  const page = req.query.page;\n  const offset = page * 20;\n  db.query(`SELECT * FROM orders LIMIT 20 OFFSET ${offset}`, (err, rows) => {\n    res.json(rows);\n  });\n});\n\napp.listen(3000, () => console.log(\"running\"));\n";
+
+function scanApp() {
+  return {
+    cfg: { configured: true, model: '' },
+    view: 'input', tab: 'local',
+    form: { local: 'C:\\Users\\ashu3\\OneDrive\\Desktop\\JOB\\projects\\vibe-audit\\fixtures\\buggy-sample', github: '', paste: '', filename: 'snippet.js', depth: 'quick' },
+    pillars: [
+      { t: 'Security', d: 'Leaked secrets, injection, broken auth, XSS and insecure defaults.', i: ICON.shield },
+      { t: 'Logic & runtime', d: 'Null access, broken async, crashes and missing error handling.', i: ICON.bolt },
+      { t: 'Correctness', d: 'API misuse, data-loss risks and performance footguns.', i: ICON.target },
+    ],
+    sevOrder: ['critical', 'high', 'medium', 'low', 'info'],
+    catOrder: ['security', 'logic', 'quality'],
+    catIcon: { security: ICON.shield, logic: ICON.bolt, quality: ICON.target },
+    scanId: null, es: null, pollT: null, jobName: '', depth: 'quick',
+    ss: {}, stage: '', log: [], result: null, error: '', finished: false,
+    stats: {}, t0: 0, now: Date.now(), timer: null,
+    filters: { sev: { critical: true, high: true, medium: true, low: true, info: true }, cat: { security: true, logic: true, quality: true }, q: '', verified: false },
+    expanded: {}, recent: [], gaugeVal: 0, copied: null,
+    starting: false, formError: '', fromCache: false,
+    backView: 'input', howStep: 0, howPlaying: false, howTimer: null,
+    calc: { critical: 0, high: 1, medium: 2, low: 1 },
+    icons: ICON, coverage: COVERAGE,
+    weightsList: [{ s: 'critical', w: 25 }, { s: 'high', w: 12 }, { s: 'medium', w: 5 }, { s: 'low', w: 2 }, { s: 'info', w: 0.5 }],
+    gradeBands: [{ g: 'A', r: '0–5', w: 6 }, { g: 'B', r: '6–15', w: 10 }, { g: 'C', r: '16–30', w: 15 }, { g: 'D', r: '31–50', w: 20 }, { g: 'F', r: '51+', w: 49 }],
+
+    async init() {
+      if (location.pathname === '/how-it-works') this.view = 'how';
+      addEventListener('popstate', () => {
+        if (this.view === 'running') { history.pushState({}, '', '/'); return; }
+        this.route(location.pathname === '/how-it-works');
+      });
+      this.resetSteps();
+      await this.loadHealth();
+      if (this.isPublic) { this.tab = 'paste'; this.form.depth = 'quick'; }
+      this.loadRecent();
+      addEventListener('keydown', e => { if ((e.ctrlKey || e.metaKey) && e.key === 'Enter' && this.view === 'input') this.start(); });
+      this.$watch('view', v => VA3D.setMode(v === 'running' ? 'scan' : v === 'done' ? 'done' : 'idle'));
+    },
+    async loadHealth() { try { this.cfg = await (await fetch('/api/health')).json(); } catch (e) {} },
+    get isPublic() { return this.cfg.mode === 'public'; },
+    get limits() { return this.cfg.limits || { max_snippet_lines: 400, max_snippet_bytes: 20000 }; },
+    get snipLines() { return this.form.paste ? this.form.paste.split('\n').length : 0; },
+    get snipBytes() { return new TextEncoder().encode(this.form.paste || '').length; },
+    get overLimit() { return this.tab === 'paste' && (this.snipLines > this.limits.max_snippet_lines || this.snipBytes > this.limits.max_snippet_bytes); },
+    /* ---------- routing: "/" (audit) and "/how-it-works" ---------- */
+    go(path) {
+      if (this.view === 'running') return;
+      if (location.pathname !== path) history.pushState({}, '', path);
+      this.route(path === '/how-it-works');
+    },
+    route(toHow) {
+      this.howStop();
+      if (toHow) { if (this.view !== 'how') this.backView = this.view; this.view = 'how'; }
+      else this.view = this.backView === 'done' && this.result ? 'done' : 'input';
+      scrollTo({ top: 0, behavior: 'smooth' });
+    },
+
+    /* ---------- how it works ---------- */
+    get howSteps() { return HOW_STEPS.filter(s => !(this.isPublic && s.localOnly)); },
+    get howCur() { return this.howSteps[this.howStep] || this.howSteps[0]; },
+    howCost(s) { return this.isPublic && s.skipSnippet ? 'No model call for snippets' : s.cost; },
+    howFree(s) { return !s.ai || (this.isPublic && s.skipSnippet); },
+    howGo(i, focus = false, auto = false) {
+      const n = this.howSteps.length; i = Math.max(0, Math.min(n - 1, i));
+      if (!auto) this.howStop();
+      this.howStep = i;
+      if (focus) this.$nextTick(() => { const b = document.getElementById('hs-' + i); if (b) b.focus(); });
+      if (!auto && !focus && innerWidth < 900) this.$nextTick(() => this.$refs.pdetail.scrollIntoView({ behavior: 'smooth', block: 'nearest' }));
+    },
+    howPlay() {
+      if (this.howStep >= this.howSteps.length - 1) this.howStep = 0;
+      this.howPlaying = true; clearInterval(this.howTimer);
+      this.howTimer = setInterval(() => {
+        if (this.howStep >= this.howSteps.length - 1) return this.howStop();
+        this.howGo(this.howStep + 1, false, true);
+      }, 2800);
+    },
+    howStop() { clearInterval(this.howTimer); this.howTimer = null; this.howPlaying = false; },
+    get calcScore() { const c = this.calc; return Math.min(100, Math.round(c.critical * 25 + c.high * 12 + c.medium * 5 + c.low * 2)); },
+    get calcGrade() { const s = this.calcScore; return s <= 5 ? 'A' : s <= 15 ? 'B' : s <= 30 ? 'C' : s <= 50 ? 'D' : 'F'; },
+    gradeLabel(g) {
+      const b = this.gradeBands.find(x => x.g === g);
+      return { A: 'Clean: nothing serious found', B: 'Minor issues', C: 'Worth fixing soon', D: 'Serious problems', F: 'Not safe to ship' }[g] + ' · grade ' + g + ' is ' + b.r;
+    },
+
+    loadSample() { this.tab = 'paste'; this.form.filename = 'server.js'; this.form.paste = SAMPLE; this.formError = ''; },
+
+    /* History: in public mode it lives only in this browser (the server has no shared list). */
+    async loadRecent() {
+      if (this.isPublic) {
+        try { this.recent = JSON.parse(localStorage.getItem('va_recent') || '[]'); } catch (e) { this.recent = []; }
+        return;
+      }
+      try { this.recent = (await (await fetch('/api/scans')).json()).scans || []; } catch (e) {}
+    },
+    remember(r) {
+      if (!this.isPublic || !r || r.status !== 'done') return;
+      const item = { scan_id: r.scan_id, name: r.input.name, risk_grade: r.risk_grade, total: (r.counts && r.counts.total) || 0, created_at: r.created_at };
+      const list = [item, ...this.recent.filter(x => x.scan_id !== item.scan_id)].slice(0, 12);
+      this.recent = list;
+      try { localStorage.setItem('va_recent', JSON.stringify(list)); } catch (e) {}
+    },
+    forget(id) {
+      if (!this.isPublic) return;
+      this.recent = this.recent.filter(x => x.scan_id !== id);
+      try { localStorage.setItem('va_recent', JSON.stringify(this.recent)); } catch (e) {}
+    },
+
+    get tabIndex() { return ['local', 'github', 'paste'].indexOf(this.tab); },
+    get inputValue() { return this.tab === 'local' ? this.form.local : this.tab === 'github' ? this.form.github : this.form.paste; },
+    get shortModel() { return (this.cfg.model || '').split('/').pop(); },
+    shortName(n) { if (!n) return ''; const p = n.replace(/[\\/]+$/, '').split(/[\\/]/); return p[p.length - 1] || n; },
+
+    /* ---------- pipeline ---------- */
+    resetSteps() { this.ss = Object.fromEntries(STEPS.map(s => [s.id, { status: 'pending', msg: '', pct: null, t0: 0, t1: 0 }])); },
+    get visibleSteps() { return STEPS.filter(s => !s.deepOnly || this.depth === 'deep'); },
+    get activeStep() { return this.visibleSteps.find(s => this.ss[s.id].status === 'active'); },
+    get activeTitle() { const a = this.activeStep; return a ? a.title : (this.finished ? 'Complete' : 'Starting…'); },
+    get overallPct() {
+      const vs = this.visibleSteps; let sum = 0;
+      for (const s of vs) {
+        const st = this.ss[s.id];
+        if (st.status === 'done' || st.status === 'skipped') sum += 1;
+        else if (st.status === 'active') sum += st.pct !== null ? (st.pct / 100) * 0.95 : Math.min(0.85, 1 - Math.exp(-(this.now - st.t0) / 9000));
+      }
+      return Math.min(100, (sum / vs.length) * 100);
+    },
+    get fmtElapsed() { const s = this.t0 ? Math.max(0, (this.now - this.t0) / 1000) : 0; return `${Math.floor(s / 60)}:${String(Math.floor(s % 60)).padStart(2, '0')} elapsed`; },
+    get liveFindings() { return (this.stats.llm || 0) + (this.stats.det || 0); },
+    stepTime(id) {
+      const st = this.ss[id];
+      if (st.status === 'done' && st.t1) return ((st.t1 - st.t0) / 1000).toFixed(1) + 's';
+      if (st.status === 'active') return ((this.now - st.t0) / 1000).toFixed(1) + 's';
+      return '';
+    },
+    activate(id) {
+      const idx = STEP_IDS.indexOf(id); if (idx < 0) return;
+      const t = Date.now();
+      STEPS.forEach((s, i) => {
+        const st = this.ss[s.id];
+        if (i < idx) {
+          if (st.status === 'active') { st.status = 'done'; st.t1 = t; VA3D.pulse('#d6b98c'); }
+          else if (st.status === 'pending') st.status = 'skipped';
+        }
+      });
+      const st = this.ss[id];
+      if (st.status === 'pending') { st.status = 'active'; st.t0 = t; }
+    },
+    completeAll() {
+      const t = Date.now();
+      STEPS.forEach(s => {
+        const st = this.ss[s.id];
+        if (st.status === 'active') { st.status = 'done'; st.t1 = t; }
+        else if (st.status === 'pending' && (!s.deepOnly || this.depth === 'deep')) st.status = 'skipped';
+      });
+      const d = this.ss.done; if (d.status !== 'done') { d.status = 'done'; d.t0 = d.t0 || t; d.t1 = t; }
+    },
+
+    /* ---------- scan lifecycle ---------- */
+    async start() {
+      if (!this.inputValue.trim() || !this.cfg.configured || this.view === 'running' || this.starting || this.overLimit) return;
+      const body = { kind: this.tab, value: this.inputValue, depth: this.isPublic ? 'quick' : this.form.depth };
+      if (this.tab === 'paste') body.filename = this.form.filename || 'snippet.txt';
+      this.formError = ''; this.starting = true;
+      let res, data = {};
+      try {
+        const payload = JSON.stringify(body), headers = { 'Content-Type': 'application/json' };
+        // On AWS, CloudFront signs requests to the Lambda URL and needs the body's SHA-256 for a POST.
+        if (window.crypto && crypto.subtle) {
+          const d = await crypto.subtle.digest('SHA-256', new TextEncoder().encode(payload));
+          headers['x-amz-content-sha256'] = [...new Uint8Array(d)].map(x => x.toString(16).padStart(2, '0')).join('');
+        }
+        res = await fetch('/api/scan', { method: 'POST', headers, body: payload });
+        try { data = await res.json(); } catch (e) {}
+      } catch (e) {
+        this.starting = false; this.formError = 'Could not reach the VibeAudit server.'; return;
+      }
+      this.starting = false;
+      if (!res.ok) {
+        // Refusals (limits, size, mode) stay on the form so the visitor can adjust and retry.
+        this.formError = (typeof data.detail === 'string' && data.detail) || ('Request failed (HTTP ' + res.status + ').');
+        this.loadHealth();
+        return;
+      }
+      if (data.cached) { this.fromCache = true; return this.openScan(data.scan_id, true); }
+
+      this.fromCache = false;
+      this.jobName = this.tab === 'paste' ? body.filename : this.inputValue;
+      this.depth = body.depth;
+      this.resetSteps(); this.log = []; this.stats = {}; this.result = null; this.error = ''; this.finished = false; this.expanded = {}; this.gaugeVal = 0;
+      this.t0 = Date.now(); this.view = 'running'; scrollTo({ top: 0, behavior: 'smooth' });
+      clearInterval(this.timer); this.timer = setInterval(() => { this.now = Date.now(); }, 100);
+      this.activate('ingest'); this.ss.ingest.msg = this.tab === 'github' ? 'Cloning repository…' : 'Loading source…';
+      this.pushLog('ingest', 'Audit started (' + this.depth + ')');
+      this.scanId = data.scan_id;
+      if (this.cfg.progress === 'poll') return this.poll(this.scanId);
+      this.es = new EventSource(`/api/scan/${this.scanId}/events`);
+      this.es.onmessage = e => this.onEvent(JSON.parse(e.data));
+      this.es.onerror = () => { if (this.es) this.es.close(); if (!this.finished && this.view === 'running') this.fail('Lost connection to the scan stream.'); };
+    },
+    // Hosted on AWS Lambda the response is buffered, so progress is polled instead of streamed.
+    poll(id) {
+      let after = 0, misses = 0;
+      const tick = async () => {
+        if (this.finished || this.view !== 'running' || this.scanId !== id) return;
+        try {
+          const r = await fetch(`/api/scan/${id}/progress?after=${after}`);
+          if (!r.ok) throw new Error('HTTP ' + r.status);
+          const d = await r.json(); misses = 0;
+          if (this.scanId !== id) return;
+          for (const ev of d.events) this.onEvent(ev);
+          after = d.next;
+        } catch (e) {
+          if (++misses >= 5) return this.fail('Lost connection to the scan.');
+        }
+        if (!this.finished) this.pollT = setTimeout(tick, 1200);
+      };
+      tick();
+    },
+    pushLog(stage, message) {
+      this.log.push({ stage, message, t: new Date().toTimeString().slice(0, 8) });
+      if (this.log.length > 400) this.log.splice(0, this.log.length - 400);
+      this.$nextTick(() => { const el = this.$refs.logbox; if (el) el.scrollTop = el.scrollHeight; });
+    },
+    parseStats(ev) {
+      const m = ev.message || '', s = this.stats;
+      if (ev.data && ev.data.total_files != null) s.files = ev.data.total_files;
+      if (ev.data && ev.data.units != null) { s.units = ev.data.units; s.segDone = 0; }
+      let r;
+      if ((r = m.match(/^(\d+)\/(\d+) segments analyzed - (\d+) findings/))) { s.segDone = +r[1]; s.units = +r[2]; this.bumpFindings(+r[3], 'llm'); }
+      if ((r = m.match(/^(\d+) deterministic finding/))) this.bumpFindings(+r[1], 'det');
+      if ((r = m.match(/(\d+) dropped as false positive/))) s.dropped = +r[1];
+      this.stats = { ...s };
+    },
+    bumpFindings(n, key) {
+      if (this.stats[key] === n) return; this.stats[key] = n;
+      this.$nextTick(() => { const el = this.$refs.fcount; if (el) { el.classList.remove('bump'); void el.offsetWidth; el.classList.add('bump'); } });
+    },
+    onEvent(ev) {
+      if (ev.stage === 'result') { this.result = ev.data; return this.finish(); }
+      const st = ev.stage;
+      if (st === 'error') {
+        const a = this.activeStep; if (a) this.ss[a.id].status = 'error';
+        this.error = ev.message || 'Scan failed.'; VA3D.setTint('#ef7f7a');
+      } else if (st === 'done') {
+        this.completeAll(); this.ss.done.msg = ev.message || '';
+      } else if (STEP_IDS.includes(st)) {
+        this.activate(st);
+        if (ev.message) this.ss[st].msg = ev.message;
+        if (typeof ev.pct === 'number') this.ss[st].pct = ev.pct;
+      }
+      if (ev.message) this.pushLog(st || 'log', ev.message);
+      this.parseStats(ev);
+      this.stage = st;
+    },
+    finish() {
+      if (this.finished) return; this.finished = true;
+      if (this.es) this.es.close();
+      clearInterval(this.timer); this.now = Date.now();
+      if (this.result && this.result.status === 'error') {
+        this.error = this.result.error || this.error || 'Scan failed.';
+        setTimeout(() => { this.view = 'error'; }, 700);
+        return;
+      }
+      this.completeAll(); VA3D.pulse('#7fd1a7');
+      setTimeout(() => this.showResult(), 1300);
+    },
+    showResult() {
+      this.view = 'done'; this.gaugeVal = 0;
+      const gcol = this.gradeColor(this.result.risk_grade);
+      VA3D.setMode('done'); VA3D.setTint(gcol);
+      setTimeout(() => { this.gaugeVal = this.result ? (this.result.risk_score || 0) : 0; VA3D.burst(gcol); }, 450);
+      if (this.isPublic) { this.remember(this.result); this.loadHealth(); } else this.loadRecent();
+      scrollTo({ top: 0, behavior: 'smooth' });
+    },
+    async openScan(id, fromCache = false) {
+      this.fromCache = fromCache;
+      try {
+        const r = await fetch('/api/scan/' + id);
+        if (r.status === 404) { this.forget(id); throw new Error('this report has expired or no longer exists'); }
+        if (!r.ok) throw new Error('HTTP ' + r.status);
+        this.result = await r.json(); this.scanId = id; this.expanded = {}; this.finished = true;
+        this.showResult();
+      } catch (e) { this.fail('Could not load that audit: ' + e.message); }
+    },
+    fail(msg) { this.error = msg; clearInterval(this.timer); clearTimeout(this.pollT); if (this.es) this.es.close(); this.view = 'error'; },
+    reset() {
+      if (this.es) this.es.close(); clearInterval(this.timer); clearTimeout(this.pollT); this.howStop();
+      if (location.pathname !== '/') history.pushState({}, '', '/');
+      this.backView = 'input'; this.view = 'input'; this.result = null; this.log = []; this.error = ''; this.finished = false; this.formError = ''; this.fromCache = false;
+      this.filters = { sev: { critical: true, high: true, medium: true, low: true, info: true }, cat: { security: true, logic: true, quality: true }, q: '', verified: false };
+      scrollTo({ top: 0, behavior: 'smooth' });
+    },
+
+    /* ---------- results ---------- */
+    get failedSegs() { return (this.result && this.result.counts && this.result.counts.failed_segments) || 0; },
+    get total() { return (this.result && this.result.counts && this.result.counts.total) || (this.result ? this.result.findings.length : 0); },
+    countSev(s) { const c = this.result && this.result.counts && this.result.counts.by_severity; return (c && c[s]) || 0; },
+    countCat(c) { return this.result ? this.result.findings.filter(f => f.category === c).length : 0; },
+    get verdictText() {
+      if (!this.result) return '';
+      const cr = this.countSev('critical'), hi = this.countSev('high'), n = this.total;
+      if (!n && this.failedSegs) return 'No issues found in the parts that were audited, but some code could not be checked. Re-run before trusting this grade.';
+      if (!n) return 'No issues detected. Ship it, but keep an eye on runtime behaviour.';
+      if (cr) return `<b>${cr} critical issue${cr > 1 ? 's' : ''}</b> need${cr > 1 ? '' : 's'} attention before this ships. The list below is ranked by severity × confidence.`;
+      if (hi) return `No criticals, but <b>${hi} high-severity issue${hi > 1 ? 's' : ''}</b> should be fixed soon.`;
+      return `<b>${n} lower-severity issue${n > 1 ? 's' : ''}</b> found. Nothing blocking, mostly polish.`;
+    },
+    get visibleFindings() {
+      if (!this.result) return [];
+      const q = this.filters.q.toLowerCase();
+      return this.result.findings.filter(f =>
+        this.filters.sev[f.severity] && this.filters.cat[f.category] &&
+        (!this.filters.verified || f.verdict === 'confirmed') &&
+        (!q || (f.title + ' ' + f.file + ' ' + (f.description || '')).toLowerCase().includes(q)));
+    },
+    exportUrl(fmt) { return `/api/scan/${this.scanId}/export?format=${fmt}`; },
+    sevColor(s) { return { critical: '#ef7f7a', high: '#eba46f', medium: '#dfc173', low: '#93b4e4', info: '#8b8b94' }[s] || '#8b8b94'; },
+    gradeColor(g) { return { A: '#7fd1a7', B: '#b4cf7c', C: '#dfc173', D: '#eba46f', F: '#ef7f7a' }[g] || '#8b8b94'; },
+    coinTilt(e) {
+      const el = this.$refs.coin; if (!el) return;
+      if (!e) { el.style.setProperty('--rx', '0deg'); el.style.setProperty('--ry', '0deg'); return; }
+      const r = e.currentTarget.getBoundingClientRect();
+      el.style.setProperty('--ry', (((e.clientX - r.left) / r.width - 0.5) * 44).toFixed(1) + 'deg');
+      el.style.setProperty('--rx', ((0.5 - (e.clientY - r.top) / r.height) * 44).toFixed(1) + 'deg');
+    },
+    async copy(text, id) { try { await navigator.clipboard.writeText(text); this.copied = id; setTimeout(() => { if (this.copied === id) this.copied = null; }, 1600); } catch (e) {} },
+    ago(iso) {
+      const s = (Date.now() - new Date(iso).getTime()) / 1000;
+      if (s < 60) return 'just now'; if (s < 3600) return Math.floor(s / 60) + 'm ago';
+      if (s < 86400) return Math.floor(s / 3600) + 'h ago'; return Math.floor(s / 86400) + 'd ago';
+    },
+  };
+}
+</script>
+</body>
+</html>

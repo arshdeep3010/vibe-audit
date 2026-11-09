@@ -1,0 +1,1207 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
+  <meta name="color-scheme" content="dark" />
+  <meta name="theme-color" content="#05060b" />
+  <title>VibeAudit — find bugs in AI-coded apps</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com" />
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=Space+Grotesk:wght@500;600;700&family=JetBrains+Mono:wght@400;500&display=swap" rel="stylesheet" />
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/three.js/r128/three.min.js"></script>
+  <script defer src="https://cdnjs.cloudflare.com/ajax/libs/alpinejs/3.14.8/cdn.min.js"></script>
+  <style>
+    /* ================================ Tokens ================================ */
+    :root {
+      color-scheme: dark;
+      --bg: #05060b;
+      --ink: #eef0ff;
+      --ink-2: rgba(226, 230, 255, 0.68);
+      --ink-3: rgba(226, 230, 255, 0.44);
+      --ink-4: rgba(226, 230, 255, 0.26);
+      --glass: rgba(16, 18, 32, 0.56);
+      --glass-2: rgba(26, 29, 50, 0.62);
+      --glass-3: rgba(255, 255, 255, 0.035);
+      --edge: rgba(255, 255, 255, 0.075);
+      --edge-2: rgba(255, 255, 255, 0.15);
+
+      --violet: #a78bfa;
+      --indigo: #818cf8;
+      --cyan: #22d3ee;
+      --gold: #f5c46b;
+      --emerald: #34d399;
+      --rose: #fb7185;
+      --orange: #fb923c;
+      --sky: #60a5fa;
+      --slate: #94a3b8;
+
+      --grad: linear-gradient(120deg, #d8ccff 0%, #a78bfa 28%, #818cf8 55%, #22d3ee 100%);
+      --grad-cta: linear-gradient(120deg, #8b5cf6 0%, #6366f1 45%, #06b6d4 100%);
+      --grad-gold: linear-gradient(120deg, #fde7b0, #f5c46b 45%, #d79a3c);
+
+      --r-xl: 26px; --r-lg: 20px; --r-md: 14px; --r-sm: 10px;
+      --font: "Inter", system-ui, -apple-system, "Segoe UI", Roboto, sans-serif;
+      --display: "Space Grotesk", "Inter", system-ui, sans-serif;
+      --mono: "JetBrains Mono", ui-monospace, "SF Mono", Consolas, monospace;
+
+      --ease-out: cubic-bezier(0.23, 1, 0.32, 1);
+      --ease-spring: cubic-bezier(0.34, 1.56, 0.64, 1);
+      --shadow: 0 30px 80px -30px rgba(0, 0, 0, 0.85), 0 10px 30px -12px rgba(0, 0, 0, 0.6);
+    }
+
+    /* ================================ Base ================================ */
+    * { box-sizing: border-box; }
+    [x-cloak] { display: none !important; }
+    html { -webkit-text-size-adjust: 100%; }
+    body {
+      margin: 0; min-height: 100vh; min-height: 100dvh;
+      font-family: var(--font); font-size: 15px; line-height: 1.55;
+      color: var(--ink); background: var(--bg);
+      -webkit-font-smoothing: antialiased; -webkit-tap-highlight-color: transparent;
+      overflow-x: hidden;
+    }
+    button, input, textarea { font: inherit; color: inherit; }
+    button { cursor: pointer; touch-action: manipulation; }
+    a { color: inherit; text-decoration: none; }
+    ::selection { background: rgba(167, 139, 250, 0.35); }
+
+    /* Aurora backdrop + 3D canvas */
+    .aurora { position: fixed; inset: 0; z-index: 0; pointer-events: none; overflow: hidden; }
+    .aurora i { position: absolute; border-radius: 50%; filter: blur(90px); opacity: 0.42; will-change: transform; }
+    .aurora i:nth-child(1) { width: 52vw; height: 52vw; left: -14vw; top: -22vw; background: #4c1d95; animation: drift1 26s ease-in-out infinite alternate; }
+    .aurora i:nth-child(2) { width: 44vw; height: 44vw; right: -12vw; top: 8vh; background: #0e7490; opacity: 0.3; animation: drift2 32s ease-in-out infinite alternate; }
+    .aurora i:nth-child(3) { width: 38vw; height: 38vw; left: 30vw; bottom: -26vw; background: #312e81; animation: drift1 38s ease-in-out infinite alternate-reverse; }
+    @keyframes drift1 { to { transform: translate(8vw, 6vh) scale(1.15); } }
+    @keyframes drift2 { to { transform: translate(-10vw, 10vh) scale(0.9); } }
+    .grain { position: fixed; inset: 0; z-index: 0; pointer-events: none; opacity: 0.06; mix-blend-mode: overlay;
+      background-image: url("data:image/svg+xml;utf8,<svg xmlns='http://www.w3.org/2000/svg' width='160' height='160'><filter id='n'><feTurbulence type='fractalNoise' baseFrequency='0.9' numOctaves='2' stitchTiles='stitch'/></filter><rect width='100%' height='100%' filter='url(%23n)'/></svg>"); }
+    #stage { position: fixed; inset: 0; width: 100vw; height: 100vh; z-index: 0; pointer-events: none; }
+
+    .app { position: relative; z-index: 1; min-height: 100vh; min-height: 100dvh; display: flex; flex-direction: column; }
+    .wrap { width: 100%; max-width: 1180px; margin: 0 auto; padding: 34px 24px 72px; }
+
+    /* ================================ Header ================================ */
+    .appbar {
+      position: sticky; top: 0; z-index: 50;
+      display: flex; align-items: center; justify-content: space-between; gap: 16px;
+      padding: 14px 24px; padding-top: max(14px, env(safe-area-inset-top));
+      background: rgba(6, 7, 13, 0.55);
+      backdrop-filter: blur(22px) saturate(160%); -webkit-backdrop-filter: blur(22px) saturate(160%);
+      border-bottom: 1px solid var(--edge);
+    }
+    .brand { display: flex; align-items: center; gap: 12px; cursor: pointer; }
+    .gem { position: relative; width: 36px; height: 36px; border-radius: 11px; flex: none;
+      background: conic-gradient(from 210deg, #a78bfa, #22d3ee, #818cf8, #f5c46b, #a78bfa);
+      box-shadow: 0 0 24px -4px rgba(167, 139, 250, 0.7), inset 0 1px 0 rgba(255,255,255,0.5);
+      display: grid; place-items: center; animation: gem 8s linear infinite; }
+    .gem::before { content: ""; position: absolute; inset: 2px; border-radius: 9px; background: linear-gradient(160deg, #1b1830, #0a0b16); }
+    .gem b { position: relative; font-family: var(--display); font-weight: 700; font-size: 17px;
+      background: var(--grad); -webkit-background-clip: text; background-clip: text; color: transparent; }
+    @keyframes gem { to { filter: hue-rotate(360deg); } }
+    .brand h1 { margin: 0; font-family: var(--display); font-size: 17px; font-weight: 600; letter-spacing: -0.01em; }
+    .brand p { margin: 0; font-size: 11.5px; color: var(--ink-3); letter-spacing: 0.02em; }
+    .pill { display: inline-flex; align-items: center; gap: 8px; padding: 6px 12px; border-radius: 99px;
+      background: var(--glass-3); border: 1px solid var(--edge); font-size: 11.5px; color: var(--ink-2); }
+    .pill .mono { color: var(--ink-3); }
+    .live { width: 7px; height: 7px; border-radius: 50%; background: var(--emerald); box-shadow: 0 0 0 0 rgba(52,211,153,0.6); animation: ping 2s infinite; }
+    .live.bad { background: var(--rose); animation: none; box-shadow: 0 0 10px var(--rose); }
+    @keyframes ping { 70% { box-shadow: 0 0 0 8px rgba(52,211,153,0); } 100% { box-shadow: 0 0 0 0 rgba(52,211,153,0); } }
+    @media (max-width: 640px) { .pill .mono { display: none; } .appbar { padding-left: 16px; padding-right: 16px; } .wrap { padding: 24px 16px 60px; } }
+
+    /* ================================ Glass + type ================================ */
+    .glass { position: relative; background: var(--glass);
+      backdrop-filter: blur(24px) saturate(150%); -webkit-backdrop-filter: blur(24px) saturate(150%);
+      border: 1px solid var(--edge); border-radius: var(--r-xl); box-shadow: var(--shadow), inset 0 1px 0 rgba(255,255,255,0.06); }
+    .glass.pad { padding: 26px; }
+    .grad-text { background: var(--grad); -webkit-background-clip: text; background-clip: text; color: transparent; }
+    .eyebrow { display: inline-flex; align-items: center; gap: 8px; font-size: 12px; font-weight: 500; letter-spacing: 0.04em;
+      color: var(--ink-2); padding: 6px 13px 6px 8px; border-radius: 99px; background: rgba(167,139,250,0.08); border: 1px solid rgba(167,139,250,0.22); }
+    .eyebrow .spark { width: 18px; height: 18px; border-radius: 50%; display: grid; place-items: center; background: var(--grad-cta); font-size: 10px; color: #fff; }
+    .mono { font-family: var(--mono); }
+    .k { color: var(--ink-3); }
+    .section-title { font-family: var(--display); font-size: 13px; font-weight: 600; letter-spacing: 0.08em; text-transform: uppercase; color: var(--ink-3); margin: 0 0 14px; display: flex; align-items: center; gap: 10px; }
+    .section-title::after { content: ""; flex: 1; height: 1px; background: linear-gradient(90deg, var(--edge-2), transparent); }
+
+    /* 3D tilt (pointer-driven) */
+    [data-tilt] { transform: perspective(900px) rotateX(var(--rx, 0deg)) rotateY(var(--ry, 0deg)) translateZ(0);
+      transition: transform 600ms var(--ease-out), border-color 200ms, box-shadow 300ms; transform-style: preserve-3d; }
+    [data-tilt].tilting { transition: transform 90ms linear, border-color 200ms, box-shadow 300ms; }
+    [data-tilt] .glare { position: absolute; inset: 0; border-radius: inherit; pointer-events: none; opacity: 0; transition: opacity 300ms;
+      background: radial-gradient(420px circle at var(--mx, 50%) var(--my, 50%), rgba(255,255,255,0.10), transparent 45%); }
+    [data-tilt].tilting .glare { opacity: 1; }
+    .lift { transform: translateZ(30px); }
+
+    /* ================================ Input view ================================ */
+    .hero { display: grid; grid-template-columns: minmax(0, 1.08fr) minmax(0, 0.92fr); gap: 36px; align-items: center; }
+    .hero h2 { font-family: var(--display); font-size: clamp(38px, 5.4vw, 64px); line-height: 1.02; letter-spacing: -0.035em; font-weight: 600; margin: 18px 0 14px; }
+    .hero .lede { color: var(--ink-2); font-size: 16.5px; max-width: 540px; margin: 0 0 26px; }
+    .core-slot { position: relative; aspect-ratio: 1; width: 100%; max-width: 500px; justify-self: center; }
+    .orbit-tag { position: absolute; font-family: var(--mono); font-size: 11.5px; color: var(--ink-2); padding: 6px 11px; border-radius: 99px;
+      background: rgba(12, 13, 24, 0.7); border: 1px solid var(--edge-2); backdrop-filter: blur(8px); -webkit-backdrop-filter: blur(8px);
+      animation: bob 6s ease-in-out infinite; white-space: nowrap; }
+    .orbit-tag::before { content: ""; display: inline-block; width: 6px; height: 6px; border-radius: 50%; margin-right: 7px; background: var(--c); box-shadow: 0 0 8px var(--c); vertical-align: 1px; }
+    @keyframes bob { 50% { transform: translateY(-10px); } }
+
+    .tabs { position: relative; display: grid; grid-template-columns: repeat(3, 1fr); padding: 4px; border-radius: 14px; background: rgba(0,0,0,0.3); border: 1px solid var(--edge); margin-bottom: 20px; }
+    .tabs .ind { position: absolute; top: 4px; bottom: 4px; left: 4px; width: calc((100% - 8px) / 3); border-radius: 10px;
+      background: linear-gradient(180deg, rgba(255,255,255,0.11), rgba(255,255,255,0.05)); border: 1px solid var(--edge-2);
+      box-shadow: 0 6px 20px -8px rgba(129,140,248,0.6); transition: transform 420ms var(--ease-spring); }
+    .tabs button { position: relative; z-index: 1; border: 0; background: none; padding: 9px 6px; font-size: 13px; font-weight: 500; color: var(--ink-3); border-radius: 10px; transition: color 200ms; display: flex; align-items: center; justify-content: center; gap: 7px; }
+    .tabs button.on { color: var(--ink); }
+    .tabs svg { width: 15px; height: 15px; opacity: 0.85; }
+
+    .label { display: flex; align-items: center; justify-content: space-between; font-size: 12.5px; color: var(--ink-2); margin-bottom: 8px; }
+    .field { width: 100%; background: rgba(0,0,0,0.32); border: 1px solid var(--edge); border-radius: var(--r-md); padding: 13px 15px; font-size: 13.5px; color: var(--ink);
+      transition: border-color 200ms, box-shadow 200ms, background 200ms; }
+    .field.code, textarea.field { font-family: var(--mono); font-size: 12.5px; }
+    textarea.field { min-height: 190px; resize: vertical; line-height: 1.6; }
+    .field::placeholder { color: var(--ink-4); }
+    .field:focus { outline: none; border-color: rgba(167,139,250,0.6); background: rgba(0,0,0,0.42); box-shadow: 0 0 0 4px rgba(167,139,250,0.14), 0 0 30px -10px rgba(167,139,250,0.6); }
+    .hint { font-size: 12px; color: var(--ink-3); margin: 9px 0 0; }
+
+    .depths { display: grid; grid-template-columns: 1fr 1fr; gap: 12px; margin: 20px 0 22px; }
+    .depth { position: relative; text-align: left; border-radius: 16px; padding: 14px 15px; background: rgba(255,255,255,0.025); border: 1px solid var(--edge); }
+    .depth.on { border-color: transparent;
+      background: linear-gradient(rgba(20,20,38,0.92), rgba(20,20,38,0.92)) padding-box, var(--grad) border-box; border: 1px solid transparent;
+      box-shadow: 0 14px 40px -18px rgba(129,140,248,0.75); }
+    .depth .dt { display: flex; align-items: center; gap: 9px; font-weight: 600; font-size: 14px; }
+    .depth .dd { font-size: 12px; color: var(--ink-3); margin-top: 4px; line-height: 1.45; }
+    .depth .ic { width: 28px; height: 28px; border-radius: 9px; display: grid; place-items: center; background: rgba(255,255,255,0.06); }
+    .depth.on .ic { background: var(--grad-cta); }
+    .depth .radio { position: absolute; top: 14px; right: 14px; width: 16px; height: 16px; border-radius: 50%; border: 1.5px solid var(--edge-2); transition: all 250ms var(--ease-spring); }
+    .depth.on .radio { border: 5px solid var(--cyan); box-shadow: 0 0 12px var(--cyan); }
+
+    .cta { position: relative; overflow: hidden; width: 100%; border: 0; border-radius: 16px; padding: 16px 22px; color: #fff;
+      font-family: var(--display); font-size: 16.5px; font-weight: 600; letter-spacing: -0.005em;
+      background: var(--grad-cta); box-shadow: 0 18px 44px -14px rgba(99,102,241,0.85), inset 0 1px 0 rgba(255,255,255,0.35);
+      display: flex; align-items: center; justify-content: center; gap: 12px; transition: transform 160ms var(--ease-out), box-shadow 300ms, filter 200ms; }
+    .cta::after { content: ""; position: absolute; top: 0; bottom: 0; width: 40%; left: -60%; transform: skewX(-20deg);
+      background: linear-gradient(90deg, transparent, rgba(255,255,255,0.35), transparent); animation: sheen 3.6s ease-in-out infinite; }
+    @keyframes sheen { 0%, 55% { left: -60%; } 100% { left: 130%; } }
+    .cta:active:not(:disabled) { transform: scale(0.985); }
+    .cta:disabled { filter: grayscale(0.7) brightness(0.6); cursor: not-allowed; }
+    .cta:disabled::after { display: none; }
+    .kbd { font-family: var(--mono); font-size: 11px; padding: 2px 7px; border-radius: 6px; background: rgba(255,255,255,0.16); border: 1px solid rgba(255,255,255,0.22); font-weight: 500; }
+    @media (hover: hover) and (pointer: fine) { .cta:hover:not(:disabled) { box-shadow: 0 22px 54px -12px rgba(99,102,241,1), inset 0 1px 0 rgba(255,255,255,0.35); filter: brightness(1.08); } }
+
+    .banner { margin-bottom: 22px; padding: 13px 16px; border-radius: var(--r-md); font-size: 13.5px;
+      background: rgba(251,113,133,0.1); border: 1px solid rgba(251,113,133,0.35); }
+    .banner code { font-family: var(--mono); font-size: 12.5px; color: var(--rose); }
+    .banner.warn { background: rgba(245,196,107,0.09); border-color: rgba(245,196,107,0.38); color: var(--ink); }
+    .banner.warn code { color: var(--gold); }
+
+    .pillars { display: grid; grid-template-columns: repeat(3, 1fr); gap: 16px; margin-top: 56px; }
+    .pillar { position: relative; padding: 22px; border-radius: var(--r-lg); background: var(--glass); border: 1px solid var(--edge);
+      backdrop-filter: blur(18px); -webkit-backdrop-filter: blur(18px); overflow: hidden; }
+    .pillar:hover { border-color: var(--edge-2); }
+    .pillar .pi { width: 42px; height: 42px; border-radius: 13px; display: grid; place-items: center; margin-bottom: 16px;
+      background: radial-gradient(circle at 30% 25%, color-mix(in srgb, var(--c) 55%, white 10%), color-mix(in srgb, var(--c) 30%, #000)); box-shadow: 0 10px 30px -8px var(--c); }
+    .pillar h4 { margin: 0 0 6px; font-family: var(--display); font-size: 17px; font-weight: 600; }
+    .pillar p { margin: 0; font-size: 13px; color: var(--ink-3); line-height: 1.55; }
+    .pillar::before { content: ""; position: absolute; inset: auto -40% -60% auto; width: 220px; height: 220px; border-radius: 50%; background: var(--c); opacity: 0.08; filter: blur(30px); }
+
+    .recent { margin-top: 48px; }
+    .recent-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(250px, 1fr)); gap: 12px; }
+    .rcard { position: relative; display: flex; align-items: center; gap: 14px; padding: 14px 16px; border-radius: 16px; text-align: left; width: 100%;
+      background: var(--glass); border: 1px solid var(--edge); backdrop-filter: blur(16px); -webkit-backdrop-filter: blur(16px); }
+    .rcard:hover { border-color: var(--edge-2); }
+    .rgrade { width: 42px; height: 42px; border-radius: 12px; display: grid; place-items: center; font-family: var(--display); font-weight: 700; font-size: 20px; flex: none;
+      color: var(--gc); background: color-mix(in srgb, var(--gc) 14%, transparent); border: 1px solid color-mix(in srgb, var(--gc) 35%, transparent); box-shadow: 0 0 22px -8px var(--gc); }
+    .rname { font-weight: 600; font-size: 14px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+    .rmeta { font-size: 11.5px; color: var(--ink-3); }
+    .rarrow { margin-left: auto; color: var(--ink-4); transition: transform 300ms var(--ease-out), color 200ms; }
+    .rcard:hover .rarrow { transform: translateX(4px); color: var(--ink); }
+
+    @media (max-width: 900px) {
+      .hero { grid-template-columns: 1fr; gap: 10px; }
+      .core-slot { order: -1; max-width: 340px; }
+      .pillars { grid-template-columns: 1fr; }
+    }
+    @media (max-width: 520px) { .depths { grid-template-columns: 1fr; } .orbit-tag { display: none; } }
+
+    /* ================================ Running view ================================ */
+    .run-grid { display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, 1fr); gap: 24px; align-items: start; }
+    .run-head { display: flex; align-items: center; justify-content: space-between; gap: 14px; margin-bottom: 22px; flex-wrap: wrap; }
+    .run-head h3 { margin: 0; font-family: var(--display); font-size: 26px; font-weight: 600; letter-spacing: -0.02em; }
+    .run-head .target { font-family: var(--mono); font-size: 12.5px; color: var(--violet); max-width: 560px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; display: block; margin-top: 3px; }
+    .ghost { border: 1px solid var(--edge-2); background: rgba(255,255,255,0.04); color: var(--ink-2); border-radius: 12px; padding: 9px 16px; font-size: 13px; font-weight: 500;
+      transition: background 200ms, color 200ms, transform 120ms; display: inline-flex; align-items: center; gap: 8px; justify-content: center; }
+    .ghost:hover { background: rgba(255,255,255,0.08); color: var(--ink); }
+    .ghost:active { transform: scale(0.97); }
+
+    .pipeline { list-style: none; margin: 0; padding: 8px 10px; }
+    .step { position: relative; display: grid; grid-template-columns: 40px minmax(0, 1fr) auto; gap: 14px; align-items: start; padding: 12px 12px; border-radius: 16px;
+      transition: background 400ms var(--ease-out); }
+    .step::before, .step::after { content: ""; position: absolute; left: 31px; top: 50px; bottom: -14px; width: 2px; border-radius: 2px; }
+    .step::before { background: var(--edge); }
+    .step::after { background: linear-gradient(180deg, var(--emerald), color-mix(in srgb, var(--emerald) 30%, transparent)); transform: scaleY(0); transform-origin: top; transition: transform 700ms var(--ease-out); }
+    .step:last-child::before, .step:last-child::after { display: none; }
+    .step.is-done::after, .step.is-skipped::after { transform: scaleY(1); }
+    .step.is-skipped::after { background: var(--edge-2); }
+    .step.is-active { background: linear-gradient(90deg, color-mix(in srgb, var(--c) 13%, transparent), transparent 85%); }
+    .step.is-active::before { background: linear-gradient(180deg, var(--c), var(--edge)); }
+
+    .node { position: relative; width: 40px; height: 40px; border-radius: 50%; display: grid; place-items: center; z-index: 1;
+      background: #0d0e1a; border: 1.5px solid var(--edge-2); transition: background 400ms var(--ease-out), border-color 400ms, box-shadow 400ms, transform 500ms var(--ease-spring); }
+    .node .num { font-family: var(--mono); font-size: 12.5px; color: var(--ink-3); transition: opacity 200ms; }
+    .node .check, .node .cross { position: absolute; width: 20px; height: 20px; fill: none; stroke: #04140d; stroke-width: 3; stroke-linecap: round; stroke-linejoin: round; opacity: 0; }
+    .node .check path { stroke-dasharray: 24; stroke-dashoffset: 24; }
+    .node .spin { position: absolute; inset: -5px; border-radius: 50%; opacity: 0;
+      background: conic-gradient(from 0deg, transparent 0 55%, var(--c) 100%);
+      -webkit-mask: radial-gradient(farthest-side, transparent calc(100% - 2.5px), #000 calc(100% - 2px)); mask: radial-gradient(farthest-side, transparent calc(100% - 2.5px), #000 calc(100% - 2px)); }
+    .step.is-active .node { border-color: color-mix(in srgb, var(--c) 60%, transparent); box-shadow: 0 0 0 6px color-mix(in srgb, var(--c) 12%, transparent), 0 0 30px -4px var(--c); }
+    .step.is-active .node .spin { opacity: 1; animation: spin 1s linear infinite; }
+    .step.is-active .node .num { color: var(--c); }
+    .step.is-done .node { background: radial-gradient(circle at 35% 30%, #a7f3d0, var(--emerald) 60%, #059669); border-color: transparent;
+      box-shadow: 0 0 24px -4px rgba(52,211,153,0.8), inset 0 1px 0 rgba(255,255,255,0.6); animation: pop 600ms var(--ease-spring); }
+    .step.is-done .node .num { opacity: 0; }
+    .step.is-done .node .check { opacity: 1; }
+    .step.is-done .node .check path { animation: draw 520ms 120ms var(--ease-out) forwards; }
+    .step.is-skipped .node { border-style: dashed; }
+    .step.is-skipped .node .num { opacity: 0.6; }
+    .step.is-error .node { background: radial-gradient(circle at 35% 30%, #fecdd3, var(--rose) 60%, #be123c); border-color: transparent; box-shadow: 0 0 24px -4px var(--rose); }
+    .step.is-error .node .num { opacity: 0; }
+    .step.is-error .node .cross { opacity: 1; stroke: #2a0710; }
+    @keyframes pop { 0% { transform: scale(0.7); } 60% { transform: scale(1.16); } 100% { transform: scale(1); } }
+    @keyframes draw { to { stroke-dashoffset: 0; } }
+    @keyframes spin { to { transform: rotate(360deg); } }
+
+    .step-title { font-weight: 600; font-size: 14.5px; display: flex; align-items: center; gap: 8px; flex-wrap: wrap; line-height: 1.3; padding-top: 2px; }
+    .step.is-pending .step-title { color: var(--ink-3); }
+    .step.is-skipped .step-title { color: var(--ink-3); text-decoration: line-through; text-decoration-color: var(--ink-4); }
+    .tagx { font-size: 10px; font-weight: 600; letter-spacing: 0.06em; text-transform: uppercase; padding: 2px 7px; border-radius: 6px; background: rgba(255,255,255,0.06); color: var(--ink-3); text-decoration: none; }
+    .tagx.live-t { color: var(--c); background: color-mix(in srgb, var(--c) 14%, transparent); }
+    .step-desc { font-size: 12.5px; color: var(--ink-3); margin-top: 3px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+    .step.is-active .step-desc, .step.is-done .step-desc { font-family: var(--mono); font-size: 11.5px; color: var(--ink-2); }
+    .step-time { font-family: var(--mono); font-size: 11.5px; color: var(--ink-3); padding-top: 4px; }
+    .step.is-done .step-time { color: var(--emerald); }
+    .mini { height: 4px; border-radius: 4px; background: rgba(255,255,255,0.06); margin-top: 8px; overflow: hidden; }
+    .mini > div { height: 100%; border-radius: 4px; background: linear-gradient(90deg, var(--c), color-mix(in srgb, var(--c) 40%, white)); box-shadow: 0 0 12px var(--c); transition: width 500ms var(--ease-out); }
+
+    .ring-slot { position: relative; width: min(100%, 400px); aspect-ratio: 1; margin: -6px auto 0; display: grid; place-items: center; }
+    .ring-slot svg.ring { position: absolute; inset: 0; width: 100%; height: 100%; transform: rotate(-90deg); overflow: visible; }
+    .ring-slot .ring circle { fill: none; stroke-width: 1.6; }
+    .ring-slot .ring .bg { stroke: rgba(255,255,255,0.06); }
+    .ring-slot .ring .fg { stroke: url(#ringGrad); stroke-linecap: round; transition: stroke-dashoffset 700ms var(--ease-out); filter: drop-shadow(0 0 4px rgba(167,139,250,0.8)); }
+    .ring-slot .ticks { stroke: rgba(255,255,255,0.12); stroke-width: 0.5; }
+    .ring-center { position: relative; z-index: 1; isolation: isolate; text-align: center; pointer-events: none; text-shadow: 0 2px 20px rgba(0,0,0,0.9); }
+    .ring-center::before { content: ""; position: absolute; inset: -34px -48px; z-index: -1; border-radius: 50%;
+      background: radial-gradient(closest-side, rgba(5,6,11,0.88) 40%, rgba(5,6,11,0.55) 70%, transparent); }
+    .ring-center .pct { font-family: var(--display); font-size: clamp(48px, 7vw, 66px); font-weight: 600; letter-spacing: -0.04em; line-height: 1; }
+    .ring-center .pct small { font-size: 0.42em; color: var(--ink-3); margin-left: 2px; }
+    .ring-center .now { font-size: 12.5px; color: var(--ink-2); margin-top: 8px; letter-spacing: 0.02em; }
+    .ring-center .now b { color: var(--c, var(--violet)); font-weight: 600; }
+
+    .stats { display: grid; grid-template-columns: repeat(4, 1fr); gap: 10px; margin: 6px 0 14px; }
+    .stat { position: relative; padding: 13px 14px; border-radius: 16px; background: var(--glass); border: 1px solid var(--edge); backdrop-filter: blur(16px); -webkit-backdrop-filter: blur(16px); overflow: hidden; }
+    .stat .v { font-family: var(--display); font-size: 24px; font-weight: 600; letter-spacing: -0.02em; line-height: 1.1; }
+    .stat .l { font-size: 11px; color: var(--ink-3); letter-spacing: 0.04em; text-transform: uppercase; margin-top: 3px; }
+    .stat::after { content: ""; position: absolute; left: 14px; right: 14px; top: 0; height: 1px; background: linear-gradient(90deg, transparent, var(--c), transparent); opacity: 0.7; }
+    .bump { animation: bump 450ms var(--ease-spring); }
+    @keyframes bump { 40% { transform: scale(1.14); } }
+
+    .term { border-radius: var(--r-lg); overflow: hidden; }
+    .term-head { display: flex; align-items: center; gap: 7px; padding: 11px 14px; border-bottom: 1px solid var(--edge); font-size: 11.5px; color: var(--ink-3); }
+    .term-head i { width: 10px; height: 10px; border-radius: 50%; background: rgba(255,255,255,0.12); }
+    .term-head i:nth-child(1) { background: #fb7185; } .term-head i:nth-child(2) { background: #f5c46b; } .term-head i:nth-child(3) { background: #34d399; }
+    .term-head span { margin-left: 8px; font-family: var(--mono); }
+    .term-body { height: 220px; overflow: auto; padding: 12px 14px; font-family: var(--mono); font-size: 11.8px; line-height: 1.75;
+      -webkit-mask-image: linear-gradient(to bottom, transparent, #000 20px); mask-image: linear-gradient(to bottom, transparent, #000 20px); }
+    .ln { display: flex; gap: 10px; animation: lnin 380ms var(--ease-out) both; }
+    .ln .s { flex: none; width: 92px; color: var(--c); opacity: 0.9; }
+    .ln .m { color: var(--ink-2); word-break: break-word; }
+    .ln .t { flex: none; color: var(--ink-4); }
+    .caret { display: inline-block; width: 7px; height: 13px; background: var(--violet); vertical-align: -2px; animation: blink 1s steps(1) infinite; margin-left: 102px; }
+    @keyframes blink { 50% { opacity: 0; } }
+    @keyframes lnin { from { opacity: 0; transform: translateX(-6px); } }
+
+    @media (max-width: 900px) { .run-grid { grid-template-columns: 1fr; } .ring-slot { width: min(100%, 320px); order: -1; } }
+    @media (max-width: 560px) { .stats { grid-template-columns: repeat(2, 1fr); } .ln .t { display: none; } .ln .s { width: 76px; } .caret { margin-left: 86px; } }
+
+    /* ================================ Results ================================ */
+    .res-hero { display: grid; grid-template-columns: 260px minmax(0, 1fr) 210px; gap: 30px; align-items: center; padding: 28px; }
+    .medal-slot { position: relative; width: 260px; height: 260px; display: grid; place-items: center; perspective: 900px; }
+    .coin { position: relative; width: 150px; height: 150px; transform-style: preserve-3d; animation: coinIn 1200ms var(--ease-spring) both, float 6s 1.2s ease-in-out infinite; }
+    .coin-tilt { transform-style: preserve-3d; transform: rotateX(var(--rx, 0deg)) rotateY(var(--ry, 0deg)); transition: transform 600ms var(--ease-out); }
+    .coin .layer { position: absolute; inset: 0; border-radius: 50%; background: color-mix(in srgb, var(--gc) 55%, #000); }
+    .coin .face { position: absolute; inset: 0; border-radius: 50%; display: grid; place-items: center; transform: translateZ(7px);
+      background: radial-gradient(circle at 32% 26%, color-mix(in srgb, var(--gc) 35%, white), var(--gc) 42%, color-mix(in srgb, var(--gc) 45%, #000) 100%);
+      box-shadow: inset 0 0 0 6px color-mix(in srgb, var(--gc) 70%, white 15%), inset 0 0 0 7px rgba(0,0,0,0.25), inset 0 -10px 30px rgba(0,0,0,0.35), 0 0 70px -6px var(--gc); }
+    .coin .face b { font-family: var(--display); font-size: 84px; font-weight: 700; letter-spacing: -0.05em; color: rgba(10,10,20,0.82); text-shadow: 0 1px 0 rgba(255,255,255,0.35); line-height: 1; transform: translateZ(10px); }
+    .coin .face::after { content: ""; position: absolute; inset: 0; border-radius: 50%; background: linear-gradient(115deg, transparent 35%, rgba(255,255,255,0.45) 48%, transparent 60%); background-size: 260% 100%; animation: glint 4.5s 1.4s ease-in-out infinite; mix-blend-mode: overlay; }
+    .coin .back { position: absolute; inset: 0; border-radius: 50%; transform: rotateY(180deg) translateZ(1px); background: color-mix(in srgb, var(--gc) 50%, #000); }
+    @keyframes coinIn { from { transform: rotateY(-540deg) scale(0.2); opacity: 0; } to { transform: rotateY(0) scale(1); opacity: 1; } }
+    @keyframes float { 50% { transform: translateY(-8px) rotateY(10deg); } }
+    @keyframes glint { 0%, 60% { background-position: 130% 0; } 100% { background-position: -40% 0; } }
+    .medal-cap { position: absolute; bottom: 4px; left: 0; right: 0; text-align: center; font-size: 11px; letter-spacing: 0.14em; text-transform: uppercase; color: var(--ink-3); }
+
+    .res-name { font-family: var(--display); font-size: clamp(24px, 3vw, 32px); font-weight: 600; letter-spacing: -0.025em; line-height: 1.1; margin: 0 0 10px; word-break: break-word; }
+    .metas { display: flex; flex-wrap: wrap; gap: 7px; margin-bottom: 18px; }
+    .meta { font-size: 11.5px; color: var(--ink-2); padding: 4px 10px; border-radius: 99px; background: rgba(255,255,255,0.05); border: 1px solid var(--edge); display: inline-flex; align-items: center; gap: 6px; }
+    .meta.ok { color: var(--emerald); border-color: rgba(52,211,153,0.3); background: rgba(52,211,153,0.08); }
+    .sevbar { display: flex; height: 10px; border-radius: 99px; overflow: hidden; background: rgba(255,255,255,0.05); gap: 2px; }
+    .sevbar > div { height: 100%; transform-origin: left; animation: grow 1100ms var(--ease-out) both; }
+    @keyframes grow { from { transform: scaleX(0); } }
+    .verdict { margin-top: 14px; font-size: 13.5px; color: var(--ink-2); line-height: 1.55; }
+    .gauge { position: relative; width: 200px; height: 118px; margin: 0 auto 12px; }
+    .gauge svg { width: 100%; height: 100%; overflow: visible; }
+    .gauge .v { position: absolute; left: 0; right: 0; bottom: 4px; text-align: center; font-family: var(--display); font-size: 34px; font-weight: 600; letter-spacing: -0.03em; line-height: 1; }
+    .gauge .v small { display: block; font-family: var(--font); font-size: 10.5px; color: var(--ink-3); letter-spacing: 0.12em; text-transform: uppercase; margin-top: 4px; font-weight: 500; }
+    .actions { display: grid; gap: 8px; }
+    .actions .two { display: grid; grid-template-columns: 1fr 1fr; gap: 8px; }
+    .btn-grad { border: 0; border-radius: 12px; padding: 11px 16px; color: #fff; font-weight: 600; font-size: 13.5px; background: var(--grad-cta); box-shadow: 0 12px 30px -12px rgba(99,102,241,0.9), inset 0 1px 0 rgba(255,255,255,0.3); transition: transform 120ms, filter 200ms; }
+    .btn-grad:hover { filter: brightness(1.1); } .btn-grad:active { transform: scale(0.97); }
+
+    @media (max-width: 1000px) { .res-hero { grid-template-columns: 1fr; justify-items: center; text-align: center; } .metas { justify-content: center; } .actions { width: 100%; max-width: 320px; } }
+
+    .tiles { display: grid; grid-template-columns: repeat(5, 1fr); gap: 12px; margin: 22px 0; }
+    .tile { position: relative; text-align: left; padding: 16px; border-radius: 18px; background: var(--glass); border: 1px solid var(--edge);
+      backdrop-filter: blur(16px); -webkit-backdrop-filter: blur(16px); overflow: hidden; transition: opacity 300ms, filter 300ms, border-color 200ms; }
+    .tile::before { content: ""; position: absolute; left: 0; right: 0; top: 0; height: 2px; background: var(--c); box-shadow: 0 0 18px 2px var(--c); }
+    .tile::after { content: ""; position: absolute; right: -30px; top: -30px; width: 100px; height: 100px; border-radius: 50%; background: var(--c); opacity: 0.12; filter: blur(24px); }
+    .tile .v { font-family: var(--display); font-size: 34px; font-weight: 600; letter-spacing: -0.03em; line-height: 1; color: var(--c); }
+    .tile .l { font-size: 11.5px; color: var(--ink-2); text-transform: capitalize; margin-top: 6px; display: flex; align-items: center; justify-content: space-between; }
+    .tile.off { opacity: 0.38; filter: saturate(0.3); }
+    @media (max-width: 760px) { .tiles { grid-template-columns: repeat(3, 1fr); } }
+    @media (max-width: 460px) { .tiles { grid-template-columns: repeat(2, 1fr); } }
+
+    .toolbar { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; margin-bottom: 16px; }
+    .chipbtn { border: 1px solid var(--edge); background: rgba(255,255,255,0.03); color: var(--ink-3); font-size: 12.5px; font-weight: 500; padding: 7px 14px; border-radius: 99px; text-transform: capitalize;
+      transition: all 200ms var(--ease-out); display: inline-flex; align-items: center; gap: 7px; }
+    .chipbtn.on { color: var(--ink); border-color: var(--edge-2); background: rgba(255,255,255,0.08); }
+    .chipbtn .n { font-family: var(--mono); font-size: 11px; color: var(--ink-3); }
+    .search-wrap { margin-left: auto; position: relative; width: 240px; }
+    .search-wrap svg { position: absolute; left: 12px; top: 50%; transform: translateY(-50%); width: 15px; height: 15px; color: var(--ink-3); }
+    .search-wrap .field { padding: 9px 12px 9px 34px; border-radius: 99px; font-size: 13px; }
+    @media (max-width: 640px) { .search-wrap { width: 100%; margin-left: 0; } }
+
+    .findings { display: flex; flex-direction: column; gap: 10px; }
+    .finding { position: relative; border-radius: 18px; background: var(--glass); border: 1px solid var(--edge); backdrop-filter: blur(16px); -webkit-backdrop-filter: blur(16px);
+      overflow: hidden; animation: rise 600ms var(--ease-out) both; animation-delay: calc(var(--i, 0) * 45ms); transition: border-color 250ms, box-shadow 350ms, transform 350ms var(--ease-out); }
+    .finding::before { content: ""; position: absolute; left: 0; top: 0; bottom: 0; width: 3px; background: var(--c); box-shadow: 0 0 16px 1px var(--c); }
+    @media (hover: hover) and (pointer: fine) { .finding:hover { transform: translateY(-2px); border-color: color-mix(in srgb, var(--c) 40%, transparent); box-shadow: 0 20px 50px -24px color-mix(in srgb, var(--c) 70%, transparent); } }
+    .finding.open { border-color: color-mix(in srgb, var(--c) 35%, transparent); }
+    @keyframes rise { from { opacity: 0; transform: translateY(14px) scale(0.98); } }
+    .fhead { width: 100%; display: flex; align-items: flex-start; gap: 14px; padding: 16px 18px 16px 20px; border: 0; background: none; text-align: left; }
+    .fidx { font-family: var(--mono); font-size: 11px; color: var(--ink-4); padding-top: 4px; width: 22px; flex: none; }
+    .sev { flex: none; font-size: 10px; font-weight: 700; letter-spacing: 0.08em; text-transform: uppercase; padding: 4px 8px; border-radius: 7px; margin-top: 1px;
+      color: var(--c); background: color-mix(in srgb, var(--c) 15%, transparent); border: 1px solid color-mix(in srgb, var(--c) 35%, transparent); }
+    .ftitle { font-weight: 600; font-size: 14.5px; line-height: 1.4; }
+    .fmeta { display: flex; flex-wrap: wrap; gap: 4px 14px; margin-top: 5px; font-size: 12px; color: var(--ink-3); align-items: center; }
+    .fmeta .path { font-family: var(--mono); color: var(--violet); word-break: break-all; }
+    .fmeta .ok { color: var(--emerald); }
+    .confbar { display: inline-block; width: 44px; height: 4px; border-radius: 4px; background: rgba(255,255,255,0.08); vertical-align: middle; margin-right: 5px; overflow: hidden; }
+    .confbar > i { display: block; height: 100%; background: var(--c); }
+    .chev { flex: none; width: 28px; height: 28px; border-radius: 9px; display: grid; place-items: center; color: var(--ink-3); background: rgba(255,255,255,0.04); transition: transform 350ms var(--ease-spring), background 200ms; }
+    .finding.open .chev { transform: rotate(90deg); background: rgba(255,255,255,0.09); color: var(--ink); }
+    .fbody { display: grid; grid-template-rows: 0fr; transition: grid-template-rows 380ms var(--ease-out); }
+    .finding.open .fbody { grid-template-rows: 1fr; }
+    .fbody > div { overflow: hidden; }
+    .fdetail { padding: 0 20px 20px 56px; display: grid; gap: 12px; font-size: 13.5px; line-height: 1.6; color: var(--ink-2); }
+    .fdetail h6 { margin: 0 0 3px; font-size: 10.5px; letter-spacing: 0.1em; text-transform: uppercase; color: var(--ink-3); font-weight: 600; }
+    .fix { padding: 12px 14px; border-radius: 12px; background: rgba(52,211,153,0.07); border: 1px solid rgba(52,211,153,0.22); color: var(--ink); position: relative; }
+    .fix h6 { color: var(--emerald); }
+    .copy { position: absolute; top: 9px; right: 9px; font-size: 11px; border: 1px solid var(--edge-2); background: rgba(0,0,0,0.3); color: var(--ink-2); border-radius: 8px; padding: 3px 9px; }
+    .fdetail pre { margin: 0; padding: 14px; border-radius: 12px; background: rgba(0,0,0,0.42); border: 1px solid var(--edge); font-family: var(--mono); font-size: 12px; line-height: 1.65; overflow: auto; color: #d6d9f7; }
+    @media (max-width: 560px) { .fdetail { padding-left: 20px; } .fidx { display: none; } }
+    .empty { text-align: center; color: var(--ink-3); padding: 40px; font-size: 14px; }
+    .clean { text-align: center; padding: 50px 20px; }
+    .clean b { display: block; font-family: var(--display); font-size: 24px; color: var(--emerald); margin-bottom: 6px; }
+
+    .err-card { max-width: 640px; margin: 40px auto; text-align: center; padding: 40px 30px; }
+    .err-ic { width: 64px; height: 64px; margin: 0 auto 18px; border-radius: 50%; display: grid; place-items: center; background: radial-gradient(circle at 35% 30%, #fecdd3, var(--rose) 60%, #be123c); box-shadow: 0 0 40px -6px var(--rose); }
+    .err-card h3 { font-family: var(--display); font-size: 26px; margin: 0 0 10px; }
+    .err-card p { font-family: var(--mono); font-size: 12.5px; color: var(--ink-2); word-break: break-word; margin: 0 0 22px; }
+
+    .foot { margin-top: auto; text-align: center; font-size: 11.5px; color: var(--ink-4); padding: 24px 20px calc(24px + env(safe-area-inset-bottom)); }
+
+    .view { animation: viewIn 700ms var(--ease-out) both; }
+    @keyframes viewIn { from { opacity: 0; transform: translateY(18px) scale(0.985); filter: blur(6px); } }
+    .stagger > * { animation: viewIn 800ms var(--ease-out) both; }
+    .stagger > *:nth-child(2) { animation-delay: 80ms; } .stagger > *:nth-child(3) { animation-delay: 160ms; }
+    .stagger > *:nth-child(4) { animation-delay: 240ms; } .stagger > *:nth-child(5) { animation-delay: 320ms; }
+
+    ::-webkit-scrollbar { width: 10px; height: 10px; }
+    ::-webkit-scrollbar-thumb { background: rgba(255,255,255,0.1); border-radius: 10px; border: 2px solid transparent; background-clip: padding-box; }
+    :focus-visible { outline: 2px solid var(--violet); outline-offset: 3px; border-radius: 8px; }
+
+    @media (prefers-reduced-motion: reduce) {
+      *, *::before, *::after { animation-duration: 1ms !important; animation-delay: 0ms !important; animation-iteration-count: 1 !important; transition-duration: 1ms !important; }
+      .step.is-active .node .spin { animation: spin 1.6s linear infinite !important; animation-iteration-count: infinite !important; }
+    }
+  </style>
+</head>
+<body>
+<div class="aurora" aria-hidden="true"><i></i><i></i><i></i></div>
+<canvas id="stage" aria-hidden="true"></canvas>
+<div class="grain" aria-hidden="true"></div>
+
+<div class="app" x-data="scanApp()" x-init="init()" x-cloak>
+  <header class="appbar">
+    <div class="brand" @click="view!=='running' && reset()">
+      <div class="gem"><b>V</b></div>
+      <div><h1>VibeAudit</h1><p>Bug finder for AI-coded apps</p></div>
+    </div>
+    <div class="pill">
+      <span class="live" :class="!cfg.configured && 'bad'"></span>
+      <span x-text="cfg.configured ? 'LLM online' : 'No API key'"></span>
+      <span class="mono" x-text="cfg.model ? '· ' + shortModel : ''"></span>
+    </div>
+  </header>
+
+  <main class="wrap">
+    <div class="banner" x-show="!cfg.configured">
+      No <code>NVIDIA_API_KEY</code> configured. Add it to the project-root <code>.env</code> and restart the server.
+    </div>
+
+    <!-- ============================ INPUT ============================ -->
+    <section x-show="view==='input'" class="view">
+      <div class="hero">
+        <div class="stagger">
+          <span class="eyebrow"><span class="spark">✦</span> Static · LLM · Runtime analysis</span>
+          <h2>Find the bugs your AI <span class="grad-text">left behind.</span></h2>
+          <p class="lede">Point VibeAudit at a folder, a GitHub repo, or a snippet. It maps the code, audits every file, verifies what it finds and hands you a ranked, graded report.</p>
+
+          <div class="glass pad">
+            <div class="tabs" role="tablist">
+              <span class="ind" :style="'transform:translateX(' + (tabIndex*100) + '%)'"></span>
+              <button role="tab" :class="tab==='local' && 'on'" @click="tab='local'">
+                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M3 7a2 2 0 0 1 2-2h4l2 2h8a2 2 0 0 1 2 2v8a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2z"/></svg>Folder</button>
+              <button role="tab" :class="tab==='github' && 'on'" @click="tab='github'">
+                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="6" cy="6" r="2.5"/><circle cx="6" cy="18" r="2.5"/><circle cx="18" cy="8" r="2.5"/><path d="M6 8.5v7M18 10.5c0 4-6 3-11 6"/></svg>GitHub</button>
+              <button role="tab" :class="tab==='paste' && 'on'" @click="tab='paste'">
+                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="m8 8-5 4 5 4M16 8l5 4-5 4M14 4l-4 16"/></svg>Paste</button>
+            </div>
+
+            <div x-show="tab==='local'">
+              <label class="label">Local project folder <span class="k">absolute path</span></label>
+              <input class="field code" x-model="form.local" spellcheck="false" placeholder="C:\path\to\your\app" @keydown.enter="start()" />
+              <p class="hint">Read straight from the server's disk, never executed.</p>
+            </div>
+            <div x-show="tab==='github'">
+              <label class="label">Public GitHub repository</label>
+              <input class="field code" x-model="form.github" spellcheck="false" placeholder="https://github.com/user/repo" @keydown.enter="start()" />
+              <p class="hint">Shallow-cloned to a temp folder and deleted after the scan.</p>
+            </div>
+            <div x-show="tab==='paste'">
+              <label class="label">Paste code <input class="field code" style="width:150px;padding:5px 10px;font-size:12px;border-radius:9px" x-model="form.filename" placeholder="snippet.js" /></label>
+              <textarea class="field" x-model="form.paste" spellcheck="false" placeholder="// paste a file or snippet here" @keydown.ctrl.enter="start()" @keydown.meta.enter="start()"></textarea>
+            </div>
+
+            <div class="depths">
+              <button class="depth" :class="form.depth==='quick' && 'on'" @click="form.depth='quick'">
+                <span class="radio"></span>
+                <div class="dt"><span class="ic">⚡</span>Quick</div>
+                <div class="dd">Static + LLM audit with verification.</div>
+              </button>
+              <button class="depth" :class="form.depth==='deep' && 'on'" @click="form.depth='deep'">
+                <span class="radio"></span>
+                <div class="dt"><span class="ic">🧪</span>Deep</div>
+                <div class="dd">Also boots the app in a Docker sandbox.</div>
+              </button>
+            </div>
+
+            <button class="cta" @click="start()" :disabled="!cfg.configured || !inputValue.trim()">
+              <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round"><circle cx="11" cy="11" r="7"/><path d="m20 20-3.5-3.5"/></svg>
+              Run audit <span class="kbd">Ctrl ↵</span>
+            </button>
+          </div>
+        </div>
+
+        <div class="core-slot" data-core>
+          <span class="orbit-tag" style="--c:var(--rose);top:12%;left:2%">hardcoded secrets</span>
+          <span class="orbit-tag" style="--c:var(--gold);top:22%;right:0;animation-delay:-2s">SQL injection</span>
+          <span class="orbit-tag" style="--c:var(--cyan);bottom:20%;left:-2%;animation-delay:-4s">null access</span>
+          <span class="orbit-tag" style="--c:var(--violet);bottom:9%;right:6%;animation-delay:-1s">race conditions</span>
+        </div>
+      </div>
+
+      <div class="pillars">
+        <template x-for="p in pillars" :key="p.t">
+          <div class="pillar" data-tilt :style="'--c:'+p.c">
+            <span class="glare"></span>
+            <div class="lift">
+              <div class="pi" x-html="p.i"></div>
+              <h4 x-text="p.t"></h4>
+              <p x-text="p.d"></p>
+            </div>
+          </div>
+        </template>
+      </div>
+
+      <div class="recent" x-show="recent.length">
+        <h5 class="section-title">Recent audits</h5>
+        <div class="recent-grid">
+          <template x-for="r in recent.slice(0,6)" :key="r.scan_id">
+            <button class="rcard" data-tilt @click="openScan(r.scan_id)" :style="'--gc:'+gradeColor(r.risk_grade)">
+              <span class="glare"></span>
+              <span class="rgrade" x-text="r.risk_grade || '?'"></span>
+              <span style="min-width:0">
+                <div class="rname" x-text="r.name"></div>
+                <div class="rmeta"><span x-text="r.total"></span> findings · <span x-text="ago(r.created_at)"></span></div>
+              </span>
+              <span class="rarrow">→</span>
+            </button>
+          </template>
+        </div>
+      </div>
+    </section>
+
+    <!-- ============================ RUNNING ============================ -->
+    <section x-show="view==='running'" class="view">
+      <div class="run-head">
+        <div>
+          <h3>Auditing <span class="grad-text" x-text="shortName(jobName)"></span></h3>
+          <span class="target" x-text="jobName"></span>
+        </div>
+        <button class="ghost" @click="reset()">
+          <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round"><path d="M18 6 6 18M6 6l12 12"/></svg>Stop watching</button>
+      </div>
+
+      <div class="run-grid">
+        <div class="glass">
+          <ol class="pipeline">
+            <template x-for="(s,i) in visibleSteps" :key="s.id">
+              <li class="step" :class="'is-' + ss[s.id].status" :style="'--c:' + s.color">
+                <div class="node">
+                  <span class="spin"></span>
+                  <span class="num" x-text="String(i+1).padStart(2,'0')"></span>
+                  <svg class="check" viewBox="0 0 24 24"><path d="M5 12.5l4.2 4.2L19 7"/></svg>
+                  <svg class="cross" viewBox="0 0 24 24"><path d="M7 7l10 10M17 7 7 17"/></svg>
+                </div>
+                <div style="min-width:0">
+                  <div class="step-title">
+                    <span x-text="s.title"></span>
+                    <span class="tagx live-t" x-show="ss[s.id].status==='active'">live</span>
+                    <span class="tagx" x-show="ss[s.id].status==='skipped'">skipped</span>
+                  </div>
+                  <div class="step-desc" x-text="ss[s.id].msg || s.desc" :title="ss[s.id].msg || s.desc"></div>
+                  <div class="mini" x-show="ss[s.id].status==='active' && ss[s.id].pct !== null"><div :style="'width:' + (ss[s.id].pct||0) + '%'"></div></div>
+                </div>
+                <div class="step-time" x-text="stepTime(s.id)"></div>
+              </li>
+            </template>
+          </ol>
+        </div>
+
+        <div>
+          <div class="ring-slot" data-core :style="'--c:' + activeColor">
+            <svg class="ring" viewBox="0 0 100 100">
+              <defs>
+                <linearGradient id="ringGrad" x1="0" y1="0" x2="1" y2="1">
+                  <stop offset="0" stop-color="#c4b5fd"/><stop offset="0.5" stop-color="#818cf8"/><stop offset="1" stop-color="#22d3ee"/>
+                </linearGradient>
+              </defs>
+              <circle class="ticks" cx="50" cy="50" r="49" stroke-dasharray="0.4 2.17" />
+              <circle class="bg" cx="50" cy="50" r="45.5" />
+              <circle class="fg" cx="50" cy="50" r="45.5" stroke-dasharray="285.9" :stroke-dashoffset="285.9 * (1 - overallPct/100)" />
+            </svg>
+            <div class="ring-center">
+              <div class="pct"><span x-text="Math.round(overallPct)"></span><small>%</small></div>
+              <div class="now"><b x-text="activeTitle"></b></div>
+              <div class="now mono" style="margin-top:4px;color:var(--ink-3)" x-text="fmtElapsed"></div>
+            </div>
+          </div>
+
+          <div class="stats">
+            <div class="stat" style="--c:var(--violet)"><div class="v" x-text="stats.files ?? '—'"></div><div class="l">Files</div></div>
+            <div class="stat" style="--c:var(--cyan)"><div class="v"><span x-text="stats.segDone ?? '—'"></span><span style="font-size:15px;color:var(--ink-3)" x-text="stats.units ? '/' + stats.units : ''"></span></div><div class="l">Segments</div></div>
+            <div class="stat" style="--c:var(--rose)"><div class="v" x-ref="fcount" x-text="liveFindings"></div><div class="l">Findings</div></div>
+            <div class="stat" style="--c:var(--emerald)"><div class="v" x-text="stats.dropped ?? 0"></div><div class="l">Filtered</div></div>
+          </div>
+
+          <div class="glass term">
+            <div class="term-head"><i></i><i></i><i></i><span>vibeaudit — live log</span></div>
+            <div class="term-body" x-ref="logbox">
+              <template x-for="(l,i) in log" :key="i">
+                <div class="ln" :style="'--c:' + stageColor(l.stage)">
+                  <span class="t" x-text="l.t"></span><span class="s" x-text="l.stage"></span><span class="m" x-text="l.message"></span>
+                </div>
+              </template>
+              <span class="caret"></span>
+            </div>
+          </div>
+        </div>
+      </div>
+    </section>
+
+    <!-- ============================ ERROR ============================ -->
+    <section x-show="view==='error'" class="view">
+      <div class="glass err-card">
+        <div class="err-ic"><svg width="26" height="26" viewBox="0 0 24 24" fill="none" stroke="#2a0710" stroke-width="3" stroke-linecap="round"><path d="M7 7l10 10M17 7 7 17"/></svg></div>
+        <h3>The audit hit a wall</h3>
+        <p x-text="error"></p>
+        <button class="btn-grad" @click="reset()">Try again</button>
+      </div>
+    </section>
+
+    <!-- ============================ RESULTS ============================ -->
+    <section x-show="view==='done' && result" class="view">
+      <template x-if="result">
+        <div>
+          <div class="glass res-hero" :style="'--gc:' + gradeColor(result.risk_grade)">
+            <div class="medal-slot" data-core @pointermove="coinTilt($event)" @pointerleave="coinTilt(null)">
+              <div class="coin-tilt" x-ref="coin">
+                <div class="coin">
+                  <template x-for="n in 7"><div class="layer" :style="'transform:translateZ(' + (n - 1) + 'px)'"></div></template>
+                  <div class="back"></div>
+                  <div class="face"><b x-text="result.risk_grade"></b></div>
+                </div>
+              </div>
+              <div class="medal-cap">Health grade</div>
+            </div>
+
+            <div style="min-width:0">
+              <h3 class="res-name" x-text="result.input.name"></h3>
+              <div class="metas">
+                <span class="meta" x-text="result.input.kind"></span>
+                <span class="meta" x-text="result.depth + ' scan'"></span>
+                <span class="meta" x-show="result.triage && result.triage.app_type" x-text="result.triage && result.triage.app_type"></span>
+                <span class="meta" x-show="result.timings && result.timings.total_s" x-text="(result.timings && result.timings.total_s) + 's'"></span>
+                <span class="meta ok" x-show="result.counts && result.counts.dropped_false_positives">✓ <span x-text="result.counts && result.counts.dropped_false_positives"></span> false positives filtered</span>
+              </div>
+              <div class="sevbar" x-show="total">
+                <template x-for="(s, i) in sevOrder" :key="s">
+                  <div x-show="countSev(s)" :style="'flex:' + countSev(s) + ';background:' + sevColor(s) + ';box-shadow:0 0 14px ' + sevColor(s) + ';animation-delay:' + (300 + i*90) + 'ms'"></div>
+                </template>
+              </div>
+              <p class="verdict" x-text="verdictText"></p>
+              <div class="metas" style="margin:12px 0 0" x-show="result.triage && result.triage.frameworks && result.triage.frameworks.length">
+                <template x-for="fw in (result.triage ? result.triage.frameworks : [])" :key="fw"><span class="meta mono" x-text="fw"></span></template>
+              </div>
+            </div>
+
+            <div>
+              <div class="gauge">
+                <svg viewBox="0 0 200 110">
+                  <defs><linearGradient id="gGrad" x1="0" x2="1"><stop offset="0" stop-color="#34d399"/><stop offset="0.5" stop-color="#f5c46b"/><stop offset="1" stop-color="#fb7185"/></linearGradient></defs>
+                  <path d="M14 100 A86 86 0 0 1 186 100" fill="none" stroke="rgba(255,255,255,0.07)" stroke-width="12" stroke-linecap="round"/>
+                  <path d="M14 100 A86 86 0 0 1 186 100" fill="none" stroke="url(#gGrad)" stroke-width="12" stroke-linecap="round" stroke-dasharray="270.2" :stroke-dashoffset="270.2 * (1 - gaugeVal/100)" style="transition:stroke-dashoffset 1400ms cubic-bezier(.23,1,.32,1);filter:drop-shadow(0 0 6px rgba(251,113,133,.5))"/>
+                </svg>
+                <div class="v"><span x-text="Math.round(gaugeVal)"></span><small>risk / 100</small></div>
+              </div>
+              <div class="actions">
+                <a class="ghost" :href="exportUrl('html')" target="_blank" rel="noopener">Open HTML report ↗</a>
+                <div class="two">
+                  <a class="ghost" :href="exportUrl('md')">.md</a>
+                  <a class="ghost" :href="exportUrl('json')">.json</a>
+                </div>
+                <button class="btn-grad" @click="reset()">New audit</button>
+              </div>
+            </div>
+          </div>
+
+          <div class="banner warn" x-show="failedSegs" style="margin-top:22px">
+            ⚠ <b x-text="failedSegs + ' of ' + (result.counts && result.counts.total_segments) + ' code segment(s)'"></b> could not be audited by the LLM, so this report is <b>incomplete</b>. Re-run the audit, or set <code>ENABLE_THINKING=false</code> in <code>.env</code> for shorter replies.
+          </div>
+
+          <div class="tiles" x-show="total">
+            <template x-for="s in sevOrder" :key="s">
+              <button class="tile" data-tilt :class="!filters.sev[s] && 'off'" :style="'--c:' + sevColor(s)" @click="filters.sev[s] = !filters.sev[s]" :title="'Toggle ' + s">
+                <span class="glare"></span>
+                <div class="v" x-text="countSev(s)"></div>
+                <div class="l"><span x-text="s"></span><span x-text="filters.sev[s] ? '●' : '○'"></span></div>
+              </button>
+            </template>
+          </div>
+
+          <div class="toolbar" x-show="total">
+            <template x-for="c in catOrder" :key="c">
+              <button class="chipbtn" :class="filters.cat[c] && 'on'" @click="filters.cat[c] = !filters.cat[c]">
+                <span x-text="catIcon[c]"></span><span x-text="c"></span><span class="n" x-text="countCat(c)"></span>
+              </button>
+            </template>
+            <button class="chipbtn" :class="filters.verified && 'on'" @click="filters.verified = !filters.verified">✓ verified only</button>
+            <div class="search-wrap">
+              <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round"><circle cx="11" cy="11" r="7"/><path d="m20 20-3.5-3.5"/></svg>
+              <input class="field" x-model="filters.q" placeholder="Search findings…" />
+            </div>
+          </div>
+
+          <div class="findings">
+            <template x-for="(f, i) in visibleFindings" :key="f.id">
+              <div class="finding" :class="expanded[f.id] && 'open'" :style="'--c:' + sevColor(f.severity) + ';--i:' + Math.min(i, 14)">
+                <button class="fhead" @click="expanded[f.id] = !expanded[f.id]">
+                  <span class="fidx" x-text="String(i+1).padStart(2,'0')"></span>
+                  <span class="sev" x-text="f.severity"></span>
+                  <span style="flex:1;min-width:0">
+                    <div class="ftitle" x-text="f.title"></div>
+                    <div class="fmeta">
+                      <span x-text="catIcon[f.category] + ' ' + f.category"></span>
+                      <span class="path" x-text="f.file + (f.line_start ? ':' + f.line_start : '')"></span>
+                      <span><span class="confbar"><i :style="'width:' + Math.round(f.confidence*100) + '%'"></i></span><span x-text="Math.round(f.confidence*100) + '%'"></span></span>
+                      <span x-show="f.cwe" x-text="f.cwe"></span>
+                      <span class="ok" x-show="f.verdict==='confirmed'">✓ verified</span>
+                      <span x-show="f.verdict==='plausible'">~ plausible</span>
+                      <span x-show="f.source && f.source!=='llm'" class="mono" x-text="f.source"></span>
+                    </div>
+                  </span>
+                  <span class="chev">›</span>
+                </button>
+                <div class="fbody"><div>
+                  <div class="fdetail">
+                    <div x-show="f.description"><h6>What's wrong</h6><span x-text="f.description"></span></div>
+                    <div x-show="f.impact"><h6>Impact</h6><span x-text="f.impact"></span></div>
+                    <div class="fix" x-show="f.recommendation">
+                      <button class="copy" @click="copy(f.recommendation, f.id)" x-text="copied===f.id ? 'Copied ✓' : 'Copy'"></button>
+                      <h6>Suggested fix</h6><span x-text="f.recommendation"></span>
+                    </div>
+                    <pre x-show="f.code_snippet" x-text="f.code_snippet"></pre>
+                  </div>
+                </div></div>
+              </div>
+            </template>
+            <div class="glass empty" x-show="total && !visibleFindings.length">No findings match the current filters.</div>
+            <div class="glass clean" x-show="!total && !failedSegs"><b>Spotless.</b><span style="color:var(--ink-2)">No issues were found in this codebase.</span></div>
+          </div>
+        </div>
+      </template>
+    </section>
+  </main>
+
+  <footer class="foot">VibeAudit · LLM-assisted analysis can be wrong. Verify findings before acting on them.</footer>
+</div>
+
+<script>
+/* ======================================================================
+   3D "audit core" — a Three.js scene that follows the [data-core] slot of
+   whichever view is visible, and reacts to scan stages.
+   ====================================================================== */
+const VA3D = (() => {
+  const stub = { setMode() {}, setColor() {}, pulse() {}, burst() {} };
+  if (!window.THREE) return stub;
+  const reduce = matchMedia('(prefers-reduced-motion: reduce)').matches;
+  let renderer;
+  const canvas = document.getElementById('stage');
+  try { renderer = new THREE.WebGLRenderer({ canvas, antialias: true, alpha: true }); } catch (e) { return stub; }
+  renderer.setPixelRatio(Math.min(devicePixelRatio || 1, 2));
+  const scene = new THREE.Scene();
+  const camera = new THREE.PerspectiveCamera(40, 1, 0.1, 200);
+  camera.position.set(0, 0, 14);
+  const ADD = THREE.AdditiveBlending;
+
+  // Starfield
+  const starGeo = new THREE.BufferGeometry();
+  const N = 1400, sp = new Float32Array(N * 3), sc = new Float32Array(N * 3);
+  const palette = [new THREE.Color('#a78bfa'), new THREE.Color('#22d3ee'), new THREE.Color('#ffffff'), new THREE.Color('#f5c46b')];
+  for (let i = 0; i < N; i++) {
+    const r = 18 + Math.random() * 40, th = Math.random() * Math.PI * 2, ph = Math.acos(2 * Math.random() - 1);
+    sp.set([r * Math.sin(ph) * Math.cos(th), r * Math.sin(ph) * Math.sin(th), r * Math.cos(ph) - 20], i * 3);
+    const c = palette[Math.random() < 0.6 ? 2 : (i % 4)];
+    sc.set([c.r, c.g, c.b], i * 3);
+  }
+  starGeo.setAttribute('position', new THREE.BufferAttribute(sp, 3));
+  starGeo.setAttribute('color', new THREE.BufferAttribute(sc, 3));
+  const stars = new THREE.Points(starGeo, new THREE.PointsMaterial({ size: 0.09, vertexColors: true, transparent: true, opacity: 0.7, depthWrite: false }));
+  scene.add(stars);
+
+  // Glow sprite texture
+  const gc = document.createElement('canvas'); gc.width = gc.height = 128;
+  const g = gc.getContext('2d'); const rg = g.createRadialGradient(64, 64, 0, 64, 64, 64);
+  rg.addColorStop(0, 'rgba(255,255,255,1)'); rg.addColorStop(0.25, 'rgba(255,255,255,0.35)'); rg.addColorStop(1, 'rgba(255,255,255,0)');
+  g.fillStyle = rg; g.fillRect(0, 0, 128, 128);
+  const glowTex = new THREE.CanvasTexture(gc);
+
+  // Core
+  const root = new THREE.Group(); scene.add(root);
+  const core = new THREE.Group(); root.add(core);
+  const color = new THREE.Color('#a78bfa'), target = new THREE.Color('#a78bfa');
+  const color2 = new THREE.Color('#22d3ee');
+
+  const shellMat = new THREE.LineBasicMaterial({ color, transparent: true, opacity: 0.8, blending: ADD, depthWrite: false });
+  const shell = new THREE.LineSegments(new THREE.EdgesGeometry(new THREE.IcosahedronGeometry(1.55, 1)), shellMat);
+  core.add(shell);
+  const innerMat = new THREE.MeshBasicMaterial({ color: color2, wireframe: true, transparent: true, opacity: 0.22, blending: ADD, depthWrite: false });
+  const inner = new THREE.Mesh(new THREE.IcosahedronGeometry(1.0, 2), innerMat);
+  core.add(inner);
+  const dotMat = new THREE.PointsMaterial({ color: 0xffffff, size: 0.045, transparent: true, opacity: 0.85, blending: ADD, depthWrite: false });
+  const dots = new THREE.Points(new THREE.IcosahedronGeometry(1.58, 3), dotMat);
+  core.add(dots);
+  const glowMat = new THREE.SpriteMaterial({ map: glowTex, color, transparent: true, opacity: 0.55, blending: ADD, depthWrite: false });
+  const glow = new THREE.Sprite(glowMat); glow.scale.set(5.2, 5.2, 1); core.add(glow);
+
+  // Orbital rings with satellites
+  const rings = [];
+  [[2.25, 1.2, 0.3, 0.9], [2.6, -0.5, 1.1, -0.6], [2.0, 0.2, -1.0, 1.3]].forEach(([r, rx, rz, sp], i) => {
+    const pivot = new THREE.Group(); pivot.rotation.set(rx, 0, rz);
+    const mat = new THREE.MeshBasicMaterial({ color: i === 1 ? color2 : color, transparent: true, opacity: 0.45, blending: ADD, depthWrite: false });
+    pivot.add(new THREE.Mesh(new THREE.TorusGeometry(r, 0.008, 6, 200), mat));
+    const sat = new THREE.Mesh(new THREE.SphereGeometry(0.06, 12, 12), new THREE.MeshBasicMaterial({ color: 0xffffff }));
+    const satGlow = new THREE.Sprite(new THREE.SpriteMaterial({ map: glowTex, color: i === 1 ? color2 : color, blending: ADD, transparent: true, depthWrite: false }));
+    satGlow.scale.set(0.6, 0.6, 1); sat.add(satGlow);
+    pivot.add(sat); root.add(pivot);
+    rings.push({ pivot, sat, r, sp, a: Math.random() * 6, mat, satGlow });
+  });
+
+  // Scanner beam (horizontal ring sweeping through the core while scanning)
+  const beamMat = new THREE.MeshBasicMaterial({ color: color2, transparent: true, opacity: 0, side: THREE.DoubleSide, blending: ADD, depthWrite: false });
+  const beam = new THREE.Mesh(new THREE.RingGeometry(1.2, 1.75, 96), beamMat);
+  beam.rotation.x = Math.PI / 2; core.add(beam);
+
+  // Shockwaves & burst
+  const waves = [];
+  function pulse(hex) {
+    const m = new THREE.MeshBasicMaterial({ color: new THREE.Color(hex || '#34d399'), transparent: true, opacity: 0.9, side: THREE.DoubleSide, blending: ADD, depthWrite: false });
+    const w = new THREE.Mesh(new THREE.RingGeometry(1.5, 1.56, 128), m);
+    w.lookAt(camera.position); root.add(w); waves.push({ w, t: 0 });
+    kick = 1;
+  }
+  let burstPts = null, burstV = null, burstT = 0;
+  function burst(hex) {
+    if (reduce) return;
+    if (burstPts) { root.remove(burstPts); burstPts.geometry.dispose(); }
+    const n = 420, pos = new Float32Array(n * 3); burstV = new Float32Array(n * 3);
+    for (let i = 0; i < n; i++) {
+      const v = new THREE.Vector3().randomDirection ? new THREE.Vector3().randomDirection() : new THREE.Vector3(Math.random() - .5, Math.random() - .5, Math.random() - .5).normalize();
+      const s = 0.04 + Math.random() * 0.09;
+      burstV.set([v.x * s, v.y * s, v.z * s], i * 3);
+    }
+    const geo = new THREE.BufferGeometry(); geo.setAttribute('position', new THREE.BufferAttribute(pos, 3));
+    burstPts = new THREE.Points(geo, new THREE.PointsMaterial({ color: new THREE.Color(hex), size: 0.07, transparent: true, opacity: 1, blending: ADD, depthWrite: false }));
+    root.add(burstPts); burstT = 0; pulse(hex); pulse('#ffffff');
+  }
+
+  let mode = 'idle', speed = 1, speedT = 1, kick = 0, beamT = 0;
+  const mouse = { x: 0, y: 0, sx: 0, sy: 0 };
+  addEventListener('pointermove', e => { mouse.x = e.clientX / innerWidth - 0.5; mouse.y = e.clientY / innerHeight - 0.5; }, { passive: true });
+
+  function resize() {
+    const w = innerWidth, h = innerHeight;
+    renderer.setSize(w, h, false); camera.aspect = w / h; camera.updateProjectionMatrix();
+  }
+  addEventListener('resize', resize); resize();
+
+  // Map a DOM rect to a world position/scale on the z=0 plane.
+  const tmp = new THREE.Vector3(), posT = new THREE.Vector3(0, 0, 0); let scaleT = 1, visT = 1, vis = 0;
+  function follow() {
+    const els = document.querySelectorAll('[data-core]'); let el = null;
+    for (const e of els) if (e.offsetParent !== null) { el = e; break; }
+    if (!el) { visT = 0; return; }
+    const r = el.getBoundingClientRect();
+    const cx = r.left + r.width / 2, cy = r.top + r.height / 2;
+    tmp.set((cx / innerWidth) * 2 - 1, -(cy / innerHeight) * 2 + 1, 0.5).unproject(camera).sub(camera.position).normalize();
+    const d = -camera.position.z / tmp.z;
+    posT.copy(camera.position).add(tmp.multiplyScalar(d));
+    const visH = 2 * Math.tan(THREE.MathUtils.degToRad(camera.fov / 2)) * camera.position.z;
+    const worldPerPx = visH / innerHeight;
+    scaleT = Math.max(0.35, (Math.min(r.width, r.height) / 2) * worldPerPx / 2.75);
+    visT = (r.bottom < -100 || r.top > innerHeight + 100) ? 0 : 1;
+  }
+
+  let last = performance.now(), first = true;
+  function frame(now) {
+    requestAnimationFrame(frame);
+    if (document.hidden) return;
+    const dt = Math.min(0.05, (now - last) / 1000); last = now;
+    const m = reduce ? 0.15 : 1;
+    follow();
+    if (first) { root.position.copy(posT); root.scale.setScalar(scaleT); first = false; }
+    root.position.lerp(posT, 0.12);
+    const s = root.scale.x + (scaleT * (1 + kick * 0.08) - root.scale.x) * 0.12; root.scale.setScalar(s);
+    vis += (visT - vis) * 0.1;
+    kick *= 0.92;
+
+    speed += (speedT - speed) * 0.04;
+    color.lerp(target, 0.04);
+    shellMat.color.copy(color); glowMat.color.copy(color);
+    rings[0].mat.color.copy(color); rings[2].mat.color.copy(color);
+    rings[0].satGlow.material.color.copy(color); rings[2].satGlow.material.color.copy(color);
+
+    mouse.sx += (mouse.x - mouse.sx) * 0.05; mouse.sy += (mouse.y - mouse.sy) * 0.05;
+    core.rotation.y += dt * 0.35 * speed * m;
+    core.rotation.x = mouse.sy * 0.6 + Math.sin(now / 4000) * 0.15;
+    root.rotation.y = mouse.sx * 0.5; root.rotation.x = mouse.sy * 0.25;
+    inner.rotation.y -= dt * 0.8 * speed * m; inner.rotation.z += dt * 0.3 * m;
+    dots.rotation.y -= dt * 0.12 * speed * m;
+    const breathe = 1 + Math.sin(now / (mode === 'scan' ? 260 : 900)) * (mode === 'scan' ? 0.05 : 0.025);
+    inner.scale.setScalar(breathe);
+    glowMat.opacity = (0.4 + Math.sin(now / 700) * 0.08 + kick * 0.4) * vis;
+    shellMat.opacity = 0.8 * vis; innerMat.opacity = 0.22 * vis; dotMat.opacity = 0.85 * vis;
+    rings.forEach(r => {
+      r.a += dt * r.sp * speed * m; r.sat.position.set(Math.cos(r.a) * r.r, Math.sin(r.a) * r.r, 0);
+      r.pivot.rotation.y += dt * 0.05 * speed * m; r.mat.opacity = 0.45 * vis; r.sat.visible = vis > 0.2;
+    });
+    beamT += dt * speed * m;
+    beamMat.opacity += (((mode === 'scan') ? 0.35 : 0) * vis - beamMat.opacity) * 0.08;
+    beam.position.y = Math.sin(beamT * 1.6) * 1.35;
+    const bs = Math.sqrt(Math.max(0.05, 1 - (beam.position.y / 1.55) ** 2)); beam.scale.set(bs, bs, 1);
+
+    for (let i = waves.length - 1; i >= 0; i--) {
+      const w = waves[i]; w.t += dt;
+      const k = 1 + w.t * 3.2; w.w.scale.set(k, k, 1); w.w.material.opacity = Math.max(0, 0.9 - w.t * 0.9) * vis;
+      if (w.t > 1.1) { root.remove(w.w); w.w.geometry.dispose(); w.w.material.dispose(); waves.splice(i, 1); }
+    }
+    if (burstPts) {
+      burstT += dt; const p = burstPts.geometry.attributes.position.array;
+      for (let i = 0; i < p.length; i++) { p[i] += burstV[i]; burstV[i] *= 0.965; }
+      burstPts.geometry.attributes.position.needsUpdate = true;
+      burstPts.material.opacity = Math.max(0, 1 - burstT / 2.4);
+      if (burstT > 2.5) { root.remove(burstPts); burstPts.geometry.dispose(); burstPts = null; }
+    }
+    stars.rotation.y += dt * 0.006 * m; stars.rotation.x = mouse.sy * 0.05;
+    camera.position.x = mouse.sx * 0.6; camera.position.y = -mouse.sy * 0.4; camera.lookAt(0, 0, 0);
+    renderer.render(scene, camera);
+  }
+  requestAnimationFrame(frame);
+
+  return {
+    setMode(m, hex) { mode = m; speedT = m === 'scan' ? 3.2 : m === 'done' ? 0.8 : 1; if (hex) target.set(hex); },
+    setColor(hex) { target.set(hex); },
+    pulse, burst,
+  };
+})();
+
+/* ======================================================================
+   Pointer-driven 3D tilt for [data-tilt] elements
+   ====================================================================== */
+(() => {
+  if (!matchMedia('(hover: hover) and (pointer: fine)').matches || matchMedia('(prefers-reduced-motion: reduce)').matches) return;
+  let cur = null;
+  const clear = el => { el.classList.remove('tilting'); el.style.setProperty('--rx', '0deg'); el.style.setProperty('--ry', '0deg'); };
+  addEventListener('pointermove', e => {
+    const el = e.target.closest && e.target.closest('[data-tilt]');
+    if (cur && cur !== el) { clear(cur); cur = null; }
+    if (!el) return;
+    cur = el; el.classList.add('tilting');
+    const r = el.getBoundingClientRect(), x = (e.clientX - r.left) / r.width, y = (e.clientY - r.top) / r.height;
+    const max = r.width > 400 ? 4 : 10;
+    el.style.setProperty('--ry', ((x - 0.5) * max * 2).toFixed(2) + 'deg');
+    el.style.setProperty('--rx', ((0.5 - y) * max * 2).toFixed(2) + 'deg');
+    el.style.setProperty('--mx', (x * 100).toFixed(1) + '%');
+    el.style.setProperty('--my', (y * 100).toFixed(1) + '%');
+  }, { passive: true });
+  document.addEventListener('pointerleave', () => { if (cur) { clear(cur); cur = null; } });
+})();
+
+/* ======================================================================
+   App state (Alpine)
+   ====================================================================== */
+const STEPS = [
+  { id: 'ingest',        title: 'Reading input',          desc: 'Loading the folder, repo or snippet',        color: '#c4b5fd' },
+  { id: 'map',           title: 'Mapping the codebase',   desc: 'Discovering, filtering and chunking files',  color: '#a78bfa' },
+  { id: 'deterministic', title: 'Deterministic scanners', desc: 'Secrets, bandit and semgrep pre-pass',       color: '#f5c46b' },
+  { id: 'triage',        title: 'Understanding the app',  desc: 'LLM triage of stack, risks and hotspots',    color: '#22d3ee' },
+  { id: 'analyze',       title: 'Deep code audit',        desc: 'Security, logic and quality, file by file',  color: '#818cf8' },
+  { id: 'verify',        title: 'Verifying findings',     desc: 'Second-pass check to drop false positives',  color: '#34d399' },
+  { id: 'dynamic',       title: 'Runtime sandbox',        desc: 'Booting the app in Docker to catch crashes', color: '#fb923c', deepOnly: true },
+  { id: 'aggregate',     title: 'Ranking & grading',      desc: 'De-duplicating and scoring every issue',     color: '#f472b6' },
+  { id: 'done',          title: 'Report ready',           desc: 'Your graded audit is assembled',             color: '#34d399' },
+];
+const STEP_IDS = STEPS.map(s => s.id);
+
+function scanApp() {
+  return {
+    cfg: { configured: true, model: '' },
+    view: 'input', tab: 'local',
+    form: { local: 'C:\\Users\\ashu3\\OneDrive\\Desktop\\JOB\\projects\\vibe-audit\\fixtures\\buggy-sample', github: '', paste: '', filename: 'snippet.js', depth: 'quick' },
+    pillars: [
+      { t: 'Security', c: '#fb7185', d: 'Leaked secrets, injection, broken auth, XSS and insecure defaults.', i: '<svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="#fff" stroke-width="2" stroke-linecap="round"><path d="M12 3 4 6v6c0 5 3.5 8 8 9 4.5-1 8-4 8-9V6z"/><path d="m9 12 2 2 4-4"/></svg>' },
+      { t: 'Logic & runtime', c: '#818cf8', d: 'Null access, broken async, crashes and missing error handling.', i: '<svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="#fff" stroke-width="2" stroke-linecap="round"><path d="M13 2 4 14h7l-1 8 9-12h-7z"/></svg>' },
+      { t: 'Correctness', c: '#22d3ee', d: 'API misuse, data-loss risks and performance footguns.', i: '<svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="#fff" stroke-width="2" stroke-linecap="round"><circle cx="12" cy="12" r="9"/><path d="m8 12 3 3 5-6"/></svg>' },
+    ],
+    sevOrder: ['critical', 'high', 'medium', 'low', 'info'],
+    catOrder: ['security', 'logic', 'quality'],
+    catIcon: { security: '🛡', logic: '⚡', quality: '◎' },
+    scanId: null, es: null, jobName: '', depth: 'quick',
+    ss: {}, stage: '', log: [], result: null, error: '', finished: false,
+    stats: {}, t0: 0, now: Date.now(), timer: null,
+    filters: { sev: { critical: true, high: true, medium: true, low: true, info: true }, cat: { security: true, logic: true, quality: true }, q: '', verified: false },
+    expanded: {}, recent: [], gaugeVal: 0, copied: null,
+
+    async init() {
+      this.resetSteps();
+      try { this.cfg = await (await fetch('/api/health')).json(); } catch (e) {}
+      this.loadRecent();
+      addEventListener('keydown', e => { if ((e.ctrlKey || e.metaKey) && e.key === 'Enter' && this.view === 'input') this.start(); });
+      this.$watch('view', v => VA3D.setMode(v === 'running' ? 'scan' : v === 'done' ? 'done' : 'idle', v === 'input' ? '#a78bfa' : v === 'error' ? '#fb7185' : null));
+    },
+    async loadRecent() { try { this.recent = (await (await fetch('/api/scans')).json()).scans || []; } catch (e) {} },
+
+    get tabIndex() { return ['local', 'github', 'paste'].indexOf(this.tab); },
+    get inputValue() { return this.tab === 'local' ? this.form.local : this.tab === 'github' ? this.form.github : this.form.paste; },
+    get shortModel() { return (this.cfg.model || '').split('/').pop(); },
+    shortName(n) { if (!n) return ''; const p = n.replace(/[\\/]+$/, '').split(/[\\/]/); return p[p.length - 1] || n; },
+
+    /* ---------- pipeline ---------- */
+    resetSteps() { this.ss = Object.fromEntries(STEPS.map(s => [s.id, { status: 'pending', msg: '', pct: null, t0: 0, t1: 0 }])); },
+    get visibleSteps() { return STEPS.filter(s => !s.deepOnly || this.depth === 'deep'); },
+    get activeStep() { return this.visibleSteps.find(s => this.ss[s.id].status === 'active'); },
+    get activeTitle() { const a = this.activeStep; return a ? a.title : (this.finished ? 'Complete' : 'Starting…'); },
+    get activeColor() { const a = this.activeStep; return a ? a.color : '#a78bfa'; },
+    get overallPct() {
+      const vs = this.visibleSteps; let sum = 0;
+      for (const s of vs) {
+        const st = this.ss[s.id];
+        if (st.status === 'done' || st.status === 'skipped') sum += 1;
+        else if (st.status === 'active') sum += st.pct !== null ? (st.pct / 100) * 0.95 : Math.min(0.85, 1 - Math.exp(-(this.now - st.t0) / 9000));
+      }
+      return Math.min(100, (sum / vs.length) * 100);
+    },
+    get fmtElapsed() { const s = this.t0 ? Math.max(0, (this.now - this.t0) / 1000) : 0; return `${Math.floor(s / 60)}:${String(Math.floor(s % 60)).padStart(2, '0')} elapsed`; },
+    get liveFindings() { return (this.stats.llm || 0) + (this.stats.det || 0); },
+    stepTime(id) {
+      const st = this.ss[id];
+      if (st.status === 'done' && st.t1) return ((st.t1 - st.t0) / 1000).toFixed(1) + 's';
+      if (st.status === 'active') return ((this.now - st.t0) / 1000).toFixed(1) + 's';
+      return '';
+    },
+    stageColor(stage) { const s = STEPS.find(x => x.id === stage); return s ? s.color : stage === 'error' ? '#fb7185' : '#94a3b8'; },
+    activate(id) {
+      const idx = STEP_IDS.indexOf(id); if (idx < 0) return;
+      const t = Date.now();
+      STEPS.forEach((s, i) => {
+        const st = this.ss[s.id];
+        if (i < idx) {
+          if (st.status === 'active') { st.status = 'done'; st.t1 = t; VA3D.pulse('#34d399'); }
+          else if (st.status === 'pending') st.status = 'skipped';
+        }
+      });
+      const st = this.ss[id];
+      if (st.status === 'pending') { st.status = 'active'; st.t0 = t; VA3D.setColor(STEPS[idx].color); }
+    },
+    completeAll() {
+      const t = Date.now();
+      STEPS.forEach(s => {
+        const st = this.ss[s.id];
+        if (st.status === 'active') { st.status = 'done'; st.t1 = t; }
+        else if (st.status === 'pending' && (!s.deepOnly || this.depth === 'deep')) st.status = 'skipped';
+      });
+      const d = this.ss.done; if (d.status !== 'done') { d.status = 'done'; d.t0 = d.t0 || t; d.t1 = t; }
+    },
+
+    /* ---------- scan lifecycle ---------- */
+    async start() {
+      if (!this.inputValue.trim() || !this.cfg.configured || this.view === 'running') return;
+      const body = { kind: this.tab, value: this.inputValue, depth: this.form.depth };
+      if (this.tab === 'paste') body.filename = this.form.filename || 'snippet.txt';
+      this.jobName = this.tab === 'paste' ? body.filename : this.inputValue;
+      this.depth = this.form.depth;
+      this.resetSteps(); this.log = []; this.stats = {}; this.result = null; this.error = ''; this.finished = false; this.expanded = {}; this.gaugeVal = 0;
+      this.t0 = Date.now(); this.view = 'running'; scrollTo({ top: 0, behavior: 'smooth' });
+      clearInterval(this.timer); this.timer = setInterval(() => { this.now = Date.now(); }, 100);
+      this.activate('ingest'); this.ss.ingest.msg = this.tab === 'github' ? 'Cloning repository…' : 'Loading source…';
+      this.pushLog('ingest', 'Audit started (' + this.depth + ')');
+      let res;
+      try { res = await fetch('/api/scan', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) }); }
+      catch (e) { return this.fail('Could not reach the VibeAudit server.'); }
+      if (!res.ok) { let t = ''; try { t = (await res.json()).detail; } catch (e) {} return this.fail(t || ('HTTP ' + res.status)); }
+      this.scanId = (await res.json()).scan_id;
+      this.es = new EventSource(`/api/scan/${this.scanId}/events`);
+      this.es.onmessage = e => this.onEvent(JSON.parse(e.data));
+      this.es.onerror = () => { if (this.es) this.es.close(); if (!this.finished && this.view === 'running') this.fail('Lost connection to the scan stream.'); };
+    },
+    pushLog(stage, message) {
+      const d = new Date(); this.log.push({ stage, message, t: d.toTimeString().slice(0, 8) });
+      if (this.log.length > 400) this.log.splice(0, this.log.length - 400);
+      this.$nextTick(() => { const el = this.$refs.logbox; if (el) el.scrollTop = el.scrollHeight; });
+    },
+    parseStats(ev) {
+      const m = ev.message || '', s = this.stats;
+      if (ev.data && ev.data.total_files != null) s.files = ev.data.total_files;
+      if (ev.data && ev.data.units != null) { s.units = ev.data.units; s.segDone = 0; }
+      let r;
+      if ((r = m.match(/^(\d+)\/(\d+) segments analyzed - (\d+) findings/))) { s.segDone = +r[1]; s.units = +r[2]; this.bumpFindings(+r[3], 'llm'); }
+      if ((r = m.match(/^(\d+) deterministic finding/))) this.bumpFindings(+r[1], 'det');
+      if ((r = m.match(/(\d+) dropped as false positive/))) s.dropped = +r[1];
+      this.stats = { ...s };
+    },
+    bumpFindings(n, key) {
+      if (this.stats[key] === n) return; this.stats[key] = n;
+      this.$nextTick(() => { const el = this.$refs.fcount; if (el) { el.classList.remove('bump'); void el.offsetWidth; el.classList.add('bump'); } });
+    },
+    onEvent(ev) {
+      if (ev.stage === 'result') { this.result = ev.data; return this.finish(); }
+      const st = ev.stage;
+      if (st === 'error') {
+        const a = this.activeStep; if (a) this.ss[a.id].status = 'error';
+        this.error = ev.message || 'Scan failed.'; VA3D.setColor('#fb7185');
+      } else if (st === 'done') {
+        this.completeAll(); this.ss.done.msg = ev.message || '';
+      } else if (STEP_IDS.includes(st)) {
+        this.activate(st);
+        if (ev.message) this.ss[st].msg = ev.message;
+        if (typeof ev.pct === 'number') this.ss[st].pct = ev.pct;
+      }
+      if (ev.message) this.pushLog(st || 'log', ev.message);
+      this.parseStats(ev);
+      this.stage = st;
+    },
+    finish() {
+      if (this.finished) return; this.finished = true;
+      if (this.es) this.es.close();
+      clearInterval(this.timer); this.now = Date.now();
+      if (this.result && this.result.status === 'error') {
+        this.error = this.result.error || this.error || 'Scan failed.';
+        setTimeout(() => { this.view = 'error'; }, 700);
+        return;
+      }
+      this.completeAll(); VA3D.pulse('#34d399');
+      setTimeout(() => this.showResult(), 1300);
+    },
+    showResult() {
+      this.view = 'done'; this.gaugeVal = 0;
+      const gcol = this.gradeColor(this.result.risk_grade);
+      VA3D.setMode('done', gcol);
+      setTimeout(() => { this.gaugeVal = this.result ? (this.result.risk_score || 0) : 0; VA3D.burst(gcol); }, 450);
+      this.loadRecent();
+      scrollTo({ top: 0, behavior: 'smooth' });
+    },
+    async openScan(id) {
+      try {
+        const r = await fetch('/api/scan/' + id); if (!r.ok) throw new Error('HTTP ' + r.status);
+        this.result = await r.json(); this.scanId = id; this.expanded = {}; this.finished = true;
+        this.showResult();
+      } catch (e) { this.fail('Could not load that audit: ' + e.message); }
+    },
+    fail(msg) { this.error = msg; clearInterval(this.timer); if (this.es) this.es.close(); this.view = 'error'; },
+    reset() {
+      if (this.es) this.es.close(); clearInterval(this.timer);
+      this.view = 'input'; this.result = null; this.log = []; this.error = ''; this.finished = false;
+      this.filters = { sev: { critical: true, high: true, medium: true, low: true, info: true }, cat: { security: true, logic: true, quality: true }, q: '', verified: false };
+      scrollTo({ top: 0, behavior: 'smooth' });
+    },
+
+    /* ---------- results ---------- */
+    get failedSegs() { return (this.result && this.result.counts && this.result.counts.failed_segments) || 0; },
+    get total() { return (this.result && this.result.counts && this.result.counts.total) || (this.result ? this.result.findings.length : 0); },
+    countSev(s) { const c = this.result && this.result.counts && this.result.counts.by_severity; return (c && c[s]) || 0; },
+    countCat(c) { return this.result ? this.result.findings.filter(f => f.category === c).length : 0; },
+    get verdictText() {
+      if (!this.result) return '';
+      const cr = this.countSev('critical'), hi = this.countSev('high'), n = this.total;
+      if (!n && this.failedSegs) return 'No issues found in the parts that were audited, but some code could not be checked. Re-run before trusting this grade.';
+      if (!n) return 'No issues detected. Ship it, but keep an eye on runtime behaviour.';
+      if (cr) return `${cr} critical issue${cr > 1 ? 's' : ''} need${cr > 1 ? '' : 's'} attention before this ships. Start at the top: the list is ranked by severity × confidence.`;
+      if (hi) return `No criticals, but ${hi} high-severity issue${hi > 1 ? 's' : ''} should be fixed soon.`;
+      return `${n} lower-severity issue${n > 1 ? 's' : ''} found. Nothing blocking, mostly polish.`;
+    },
+    get visibleFindings() {
+      if (!this.result) return [];
+      const q = this.filters.q.toLowerCase();
+      return this.result.findings.filter(f =>
+        this.filters.sev[f.severity] && this.filters.cat[f.category] &&
+        (!this.filters.verified || f.verdict === 'confirmed') &&
+        (!q || (f.title + ' ' + f.file + ' ' + (f.description || '')).toLowerCase().includes(q)));
+    },
+    exportUrl(fmt) { return `/api/scan/${this.scanId}/export?format=${fmt}`; },
+    sevColor(s) { return { critical: '#fb7185', high: '#fb923c', medium: '#f5c46b', low: '#60a5fa', info: '#94a3b8' }[s] || '#94a3b8'; },
+    gradeColor(g) { return { A: '#34d399', B: '#a3e635', C: '#facc15', D: '#fb923c', F: '#fb7185' }[g] || '#94a3b8'; },
+    coinTilt(e) {
+      const el = this.$refs.coin; if (!el) return;
+      if (!e) { el.style.setProperty('--rx', '0deg'); el.style.setProperty('--ry', '0deg'); return; }
+      const r = e.currentTarget.getBoundingClientRect();
+      el.style.setProperty('--ry', (((e.clientX - r.left) / r.width - 0.5) * 50).toFixed(1) + 'deg');
+      el.style.setProperty('--rx', ((0.5 - (e.clientY - r.top) / r.height) * 50).toFixed(1) + 'deg');
+    },
+    async copy(text, id) { try { await navigator.clipboard.writeText(text); this.copied = id; setTimeout(() => { if (this.copied === id) this.copied = null; }, 1600); } catch (e) {} },
+    ago(iso) {
+      const s = (Date.now() - new Date(iso).getTime()) / 1000;
+      if (s < 60) return 'just now'; if (s < 3600) return Math.floor(s / 60) + 'm ago';
+      if (s < 86400) return Math.floor(s / 3600) + 'h ago'; return Math.floor(s / 86400) + 'd ago';
+    },
+  };
+}
+</script>
+</body>
+</html>

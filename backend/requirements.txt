@@ -1,0 +1,18 @@
+# Core (Phases 0-3)
+fastapi>=0.115,<1.0
+uvicorn[standard]>=0.30
+openai>=1.50
+pydantic>=2.8
+pydantic-settings>=2.4
+python-dotenv>=1.0
+httpx>=0.27
+python-multipart>=0.0.9
+bandit>=1.7                       # Python static security linter (deterministic pre-pass)
+
+# Phase 4 (dynamic analysis) - install when enabling ENABLE_DYNAMIC:
+#   pip install playwright && playwright install chromium
+# playwright>=1.47
+
+# Optional deterministic scanners (auto-detected if present):
+#   pip install semgrep             # multi-language; limited Windows support
+#   npm i -g eslint                 # JS/TS — deferred to the Phase 4 sandbox (can execute repo config)

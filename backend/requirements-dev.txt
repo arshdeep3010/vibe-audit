@@ -1,0 +1,5 @@
+-r requirements.txt
+pytest>=8.0
+boto3>=1.34              # Lambda runtime (DynamoDB / SSM); provided by AWS in production
+mangum>=0.19
+moto[dynamodb,ssm]>=5.0  # mocked AWS for tests/test_cloud.py
