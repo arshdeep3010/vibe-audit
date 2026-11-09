@@ -22,9 +22,13 @@ variable "github_environment" {
 }
 
 variable "github_sub_prefix" {
-  description = "Override the token subject prefix if your repo uses a customised OIDC sub claim (default: repo:<owner>/<name>)."
+  # Repos created since 2026 send an immutable subject with owner and repo IDs, so a deleted
+  # and re-created repo of the same name can't deploy. Check yours with:
+  #   gh api repos/<owner>/<name>/actions/oidc/customization/sub
+  # Set "" for the older repo:<owner>/<name> form.
+  description = "Token subject prefix for the GitHub repo (the sub claim before :environment/:ref)."
   type        = string
-  default     = ""
+  default     = "repo:arshdeep3010@188484562/vibe-audit@1450950874"
 }
 
 variable "create_github_oidc_provider" {
