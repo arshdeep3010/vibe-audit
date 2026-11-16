@@ -116,6 +116,12 @@ async def _verify_batch(llm: LLMClient, group: list[Finding], sf: SourceFile, se
             continue
         if 0 <= idx < len(group) and group[idx].verdict == Verdict.unverified:
             out.append(_apply(group[idx], it))
+            try:
+                dup = int(it.get("duplicate_of")) - 1
+            except (TypeError, ValueError):
+                dup = -1
+            if 0 <= dup < idx:  # only an earlier finding, so chains always point backwards
+                group[idx].duplicate_of = group[dup].id
     return out
 
 

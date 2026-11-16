@@ -57,6 +57,15 @@ def _overlap(a: Finding, b: Finding) -> bool:
 
 
 _CWE_RE = re.compile(r"(\d+)")
+_STOP = {"the", "and", "with", "from", "via", "for", "not", "into", "without", "used", "use",
+         "uses", "using", "code", "data", "request", "input", "user", "issue", "missing", "never",
+         "inside", "built", "endpoint", "source", "value", "all", "this", "that", "are", "was"}
+
+
+def _keywords(title: str) -> set[str]:
+    words = (w[:-2] if w.endswith("ed") else w[:-1] if w.endswith("s") else w
+             for w in _WORD_RE.findall(title.lower()))
+    return {w for w in words if len(w) >= 3 and w not in _STOP}
 
 
 def _cwe(f: Finding) -> str | None:
@@ -69,9 +78,10 @@ def _similar(a: Finding, b: Finding) -> bool:
         return False
     if _overlap(a, b):
         # Two different weaknesses can sit on the same lines (a hard-coded secret and a SQL
-        # injection in one handler). When both name a CWE, it has to match.
+        # injection in one handler). Tools label the same bug with different CWEs, though, so
+        # a CWE mismatch only blocks the merge when the titles share no keyword either.
         ca, cb = _cwe(a), _cwe(b)
-        return not (ca and cb and ca != cb)
+        return not (ca and cb and ca != cb) or bool(_keywords(a.title) & _keywords(b.title))
     ta, tb = _norm_title(a.title), _norm_title(b.title)
     if not ta or not tb:
         return False
@@ -81,8 +91,13 @@ def _similar(a: Finding, b: Finding) -> bool:
 
 def _dedupe(findings: list[Finding]) -> list[Finding]:
     kept: list[Finding] = []
+    home: dict[str, Finding] = {}   # finding id -> the kept finding it ended up in
     for f in findings:
-        match = next((k for k in kept if _similar(k, f)), None)
+        # The judge's call ("same bug as #3") wins; otherwise fall back to the heuristic.
+        match = home.get(f.duplicate_of) if f.duplicate_of else None
+        if match is None or match.file != f.file:
+            match = next((k for k in kept if _similar(k, f)), None)
+        home[f.id] = match or f
         if match is None:
             kept.append(f)
             continue

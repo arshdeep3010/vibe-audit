@@ -42,6 +42,10 @@ def main() -> None:
     ], check=True)
     shutil.copytree(ROOT / "backend" / "app", stage / "app",
                     ignore=shutil.ignore_patterns("__pycache__", "*.pyc"))
+    # The API doesn't run Semgrep (the worker image does), but it reports the rule pack in
+    # /api/health, so it ships the rules too (a few KB; their test cases stay behind).
+    shutil.copytree(ROOT / "backend" / "rules", stage / "rules",
+                    ignore=shutil.ignore_patterns("tests"))
 
     out = BUILD / "lambda.zip"
     out.unlink(missing_ok=True)

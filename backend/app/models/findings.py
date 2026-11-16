@@ -89,6 +89,7 @@ class Finding(BaseModel):
     rule_id: str | None = None           # scanner rule that fired (semgrep / bandit test id)
     judge_note: str = ""                 # the model's one-line reason when it judged this finding
     corroborated_by: list[str] = Field(default_factory=list)  # other sources reporting the same issue
+    duplicate_of: str | None = Field(default=None, exclude=True)  # set by the judge; used to merge
 
     @property
     def rank(self) -> float:

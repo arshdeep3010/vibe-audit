@@ -40,7 +40,8 @@ class FakeLLM:
                     verdicts.append({"id": int(num), "verdict": "dropped" if noise else "confirmed",
                                      "confidence": 0.2 if noise else 0.9,
                                      "reason": "Only a constant reaches it." if noise else "Reachable from the request.",
-                                     "impact": "An attacker controls the query.", "fix": "Use placeholders."})
+                                     "impact": "An attacker controls the query.", "fix": "Use placeholders.",
+                                     "duplicate_of": 1 if "dup:" in title else None})
             return {"verdicts": verdicts}
         if "TRUE POSITIVE" in system:
             self.calls.append("verify_one")

@@ -38,6 +38,12 @@ def test_local_mode_adds_registry_and_pro_with_token(semgrep_on, mode, monkeypat
     assert det._semgrep_env(pro=True)["SEMGREP_APP_TOKEN"] == "tok"
 
 
+def test_api_package_ships_the_rule_pack():
+    """The API zip must contain backend/rules, or /api/health reports Semgrep as unavailable."""
+    src = (RULES_DIR.parents[1] / "infra" / "build_lambda.py").read_text(encoding="utf-8")
+    assert '"backend" / "rules"' in src
+
+
 def test_semgrep_result_becomes_an_unverified_finding():
     f = det._semgrep_finding({
         "check_id": "backend.rules.js-sql-built-from-strings",
@@ -86,7 +92,11 @@ def test_model_judges_scanner_hits_within_two_calls(api, monkeypatch):
             Finding(title="noise: SQL built from a number", category="security", severity="medium",
                     file="server.js", line_start=90, line_end=90, source=Source.semgrep,
                     rule_id="js-sql-built-from-strings", description="SQL built from strings."),
-        ], "semgrep (community engine; VibeAudit rules): 2 finding(s)"
+            # Different lines and CWE, so only the judge's duplicate_of can merge it.
+            Finding(title="dup: tainted database call", category="security", severity="low",
+                    file="server.js", line_start=30, line_end=30, source=Source.semgrep, cwe="CWE-943",
+                    rule_id="express-mysql-sqli", description="Untrusted input reaches a query."),
+        ], "semgrep (community engine; VibeAudit rules): 3 finding(s)"
 
     monkeypatch.setattr(det, "_run_semgrep", fake_semgrep)
     res = wait_done(api, paste(api).json()["scan_id"])
@@ -103,7 +113,9 @@ def test_model_judges_scanner_hits_within_two_calls(api, monkeypatch):
     assert res["dismissed"][0]["judge_note"] == "Only a constant reaches it."
     assert res["counts"]["scanner_dismissed"] == 1
     assert res["counts"]["dropped_false_positives"] == 1      # the model's own "Speculative issue"
-    assert res["counts"]["merged_duplicates"] == 1            # semgrep's SQL hit joined the model's
+    assert res["counts"]["merged_duplicates"] == 2            # both semgrep SQL hits joined the model's
+    assert not any(f["title"].startswith("dup:") for f in res["findings"])
+    assert all("duplicate_of" not in f for f in res["findings"])   # internal only
     assert any("semgrep (community engine" in line for line in res["log"])
 
 
@@ -121,6 +133,14 @@ def test_different_weaknesses_on_the_same_lines_stay_separate():
     assert len(out["findings"]) == 2 and out["merged"] == 1
     merged = next(f for f in out["findings"] if f.cwe == "CWE-89")
     assert (merged.line_start, merged.line_end, merged.corroborated_by) == (22, 22, ["semgrep"])
+
+    # Same bug, different CWE labels: a shared title keyword still merges them.
+    llm = Finding(title="Broken async/await in checkout: forEach doesn't wait", category="logic",
+                  severity="high", file="a.js", line_start=63, line_end=66, cwe="CWE-833")
+    rule = Finding(title="async callback inside forEach is never awaited", category="logic",
+                   severity="high", file="a.js", line_start=63, line_end=63, cwe="CWE-362",
+                   source=Source.semgrep)
+    assert len(aggregate([llm, rule])["findings"]) == 1
 
 
 def test_long_semgrep_match_points_at_its_first_line():

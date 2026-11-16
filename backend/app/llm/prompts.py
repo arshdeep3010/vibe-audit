@@ -126,7 +126,9 @@ VERIFY_BATCH_SYSTEM = """You verify whether reported code issues are TRUE POSITI
 
 For findings marked "scanner", also write "impact" (the concrete consequence in THIS code, not a generic description) and "fix" (the specific change to make here).
 
-Output ONLY JSON: {"verdicts":[{"id":<finding number>,"verdict":"confirmed|plausible|dropped","confidence":<0.0-1.0>,"reason":"<one sentence>","impact":"<scanner findings>","fix":"<scanner findings>"}]} with one entry per finding."""
+Several tools may report the same bug. If a finding describes the same bug at the same place as an EARLIER finding in the list, set "duplicate_of" to that earlier finding's number (still give its own verdict); otherwise null.
+
+Output ONLY JSON: {"verdicts":[{"id":<finding number>,"verdict":"confirmed|plausible|dropped","confidence":<0.0-1.0>,"reason":"<one sentence>","impact":"<scanner findings>","fix":"<scanner findings>","duplicate_of":<earlier finding number or null>}]} with one entry per finding."""
 
 
 def _origin(f: Finding) -> str:
