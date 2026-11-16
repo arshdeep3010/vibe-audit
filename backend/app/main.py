@@ -18,6 +18,7 @@ from fastapi.responses import (
 )
 from pydantic import BaseModel
 
+from app.analysis.deterministic import semgrep_status
 from app.config import PROJECT_ROOT, settings
 from app.jobs import PING, ScanManager, failed_result
 from app.limits import Limiter, ScanInput, ScanRejected, content_hash, validate_input
@@ -137,6 +138,7 @@ def health() -> dict:
         "mode": settings.app_mode,
         "dynamic": settings.enable_dynamic and not settings.public,
         "progress": "poll" if settings.serverless else "sse",
+        "semgrep": semgrep_status(),
         "limits": {
             "max_snippet_lines": settings.max_snippet_lines,
             "max_snippet_bytes": settings.max_snippet_bytes,

@@ -64,6 +64,18 @@ class Settings(BaseSettings):
     enable_dynamic: bool = True          # Phase 4: run the app in Docker on a "deep" scan
     enable_browser_probe: bool = True    # Phase 4: Playwright console probe (if installed)
 
+    # --- Semgrep ---
+    # Always runs VibeAudit's own rule pack (backend/rules). Locally it also runs the Semgrep
+    # Registry's p/default rules, and with SEMGREP_APP_TOKEN set it switches to the Pro engine
+    # (cross-function analysis + Pro rules). Public mode never uses the registry, the token or
+    # the Pro engine: those rules are licensed for your own code, not as a hosted service.
+    enable_semgrep: bool = True
+    semgrep_bin: str = ""                # empty = find `semgrep` on PATH or in .venv-semgrep
+    semgrep_app_token: str = ""          # local only; never sent to the public demo
+    semgrep_registry_config: str = "p/default"
+    semgrep_timeout_s: int = 60
+    max_judged_scanner_findings: int = 40  # scanner findings the model judges per scan
+
     # --- Dynamic sandbox (Phase 4) ---
     dynamic_timeout_s: int = 180
     dynamic_memory: str = "1g"

@@ -9,14 +9,20 @@ from app.models.findings import (
     Category,
     Finding,
     Severity,
+    Source,
     Verdict,
 )
+
+_VERDICT_RANK = {Verdict.confirmed: 3, Verdict.plausible: 2, Verdict.unverified: 1, Verdict.dropped: 0}
 
 _WORD_RE = re.compile(r"[a-z0-9]+")
 
 
 def aggregate(findings: list[Finding]) -> dict:
     kept = [f for f in findings if f.verdict != Verdict.dropped]
+    # Scanner hits the model judged to be false positives: shown in the report, not scored.
+    dismissed = [f for f in findings
+                 if f.verdict == Verdict.dropped and f.source in (Source.semgrep, Source.bandit)]
     deduped = _dedupe(kept)
     deduped.sort(key=lambda f: (SEVERITY_ORDER[f.severity], f.confidence), reverse=True)
     score = _risk_score(deduped)
@@ -25,7 +31,10 @@ def aggregate(findings: list[Finding]) -> dict:
         "risk_score": score,
         "risk_grade": _grade(score),
         "counts": _counts(deduped),
-        "dropped": len(kept) - len(deduped),
+        # The model's own findings that verification rejected.
+        "dropped": sum(1 for f in findings if f.verdict == Verdict.dropped and f.source == Source.llm),
+        "merged": len(kept) - len(deduped),
+        "dismissed": dismissed,
     }
 
 
@@ -47,11 +56,22 @@ def _overlap(a: Finding, b: Finding) -> bool:
     return not (a1 < b0 or b1 < a0)
 
 
+_CWE_RE = re.compile(r"(\d+)")
+
+
+def _cwe(f: Finding) -> str | None:
+    m = _CWE_RE.search(f.cwe or "")
+    return m.group(1) if m else None
+
+
 def _similar(a: Finding, b: Finding) -> bool:
     if a.file != b.file or a.category != b.category:
         return False
     if _overlap(a, b):
-        return True
+        # Two different weaknesses can sit on the same lines (a hard-coded secret and a SQL
+        # injection in one handler). When both name a CWE, it has to match.
+        ca, cb = _cwe(a), _cwe(b)
+        return not (ca and cb and ca != cb)
     ta, tb = _norm_title(a.title), _norm_title(b.title)
     if not ta or not tb:
         return False
@@ -73,11 +93,26 @@ def _dedupe(findings: list[Finding]) -> list[Finding]:
         match.confidence = max(match.confidence, f.confidence)
         fa, fb = _lines(f)
         ma, mb = _lines(match)
-        if fa and ma:
+        if fa and ma and f.source == match.source:  # a scanner hit never moves the model's lines
             match.line_start = min(ma, fa)
             match.line_end = max(mb, fb)
         if not match.cwe and f.cwe:
             match.cwe = f.cwe
+        # Record that another tool found the same issue (e.g. the model AND a semgrep rule).
+        if f.source != match.source and f.source.value not in match.corroborated_by:
+            match.corroborated_by.append(f.source.value)
+        for src in f.corroborated_by:
+            if src != match.source.value and src not in match.corroborated_by:
+                match.corroborated_by.append(src)
+        if not match.rule_id and f.rule_id:
+            match.rule_id = f.rule_id
+        if _VERDICT_RANK[f.verdict] > _VERDICT_RANK[match.verdict]:
+            match.verdict = f.verdict
+            match.judge_note = f.judge_note or match.judge_note
+        if not match.impact and f.impact:
+            match.impact = f.impact
+        if not match.recommendation and f.recommendation:
+            match.recommendation = f.recommendation
     return kept
 
 

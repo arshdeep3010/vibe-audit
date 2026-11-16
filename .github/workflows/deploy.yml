@@ -1,5 +1,5 @@
-# Push to main → tests → build the Lambda package → terraform apply → upload the frontend
-# to S3 → invalidate CloudFront → smoke test.
+# Push to main → tests → build the worker image (arm64, pushed to ECR) and the API zip →
+# terraform apply → upload the frontend to S3 → invalidate CloudFront → smoke test.
 #
 # AWS access is short-lived: the job trades GitHub's OIDC token for the deploy role made by
 # infra/bootstrap. No AWS keys are stored in GitHub. Repository variables to set:
@@ -23,8 +23,44 @@ jobs:
   checks:
     uses: ./.github/workflows/ci.yml
 
-  deploy:
+  # The worker Lambda is a container image (it carries Semgrep). Built natively on an arm64
+  # runner to match the function's architecture, tagged with the commit, pinned by digest.
+  worker-image:
     needs: checks
+    runs-on: ubuntu-24.04-arm
+    permissions:
+      contents: read
+      id-token: write # OIDC → AWS
+    outputs:
+      image: ${{ steps.push.outputs.image }}
+    steps:
+      - uses: actions/checkout@v5
+
+      - uses: aws-actions/configure-aws-credentials@v5
+        with:
+          role-to-assume: ${{ vars.AWS_DEPLOY_ROLE_ARN }}
+          aws-region: ${{ vars.AWS_REGION }}
+
+      - name: Log in to ECR
+        id: ecr
+        run: |
+          repo=$(aws ecr describe-repositories --repository-names vibeaudit-worker --query "repositories[0].repositoryUri" --output text)
+          aws ecr get-login-password | docker login --username AWS --password-stdin "${repo%%/*}"
+          echo "repo=$repo" >> "$GITHUB_OUTPUT"
+
+      - name: Build and push
+        id: push
+        env:
+          REPO: ${{ steps.ecr.outputs.repo }}
+        run: |
+          docker build --platform linux/arm64 --provenance=false -t "$REPO:$GITHUB_SHA" backend
+          docker push "$REPO:$GITHUB_SHA"
+          digest=$(docker inspect --format '{{index .RepoDigests 0}}' "$REPO:$GITHUB_SHA")
+          echo "image=$digest" >> "$GITHUB_OUTPUT"
+          echo "Worker image: \`$digest\`" >> "$GITHUB_STEP_SUMMARY"
+
+  deploy:
+    needs: [checks, worker-image]
     runs-on: ubuntu-latest
     environment:
       name: production
@@ -36,6 +72,7 @@ jobs:
       TF_IN_AUTOMATION: "1"
       TF_VAR_region: ${{ vars.AWS_REGION }}
       TF_VAR_budget_email: ${{ vars.BUDGET_EMAIL }}
+      TF_VAR_worker_image_uri: ${{ needs.worker-image.outputs.image }}
     steps:
       - uses: actions/checkout@v5
 
@@ -43,7 +80,7 @@ jobs:
         with:
           python-version: "3.12"
 
-      - name: Build Lambda package
+      - name: Build API Lambda package
         run: python infra/build_lambda.py --arch arm64 --python 3.12
 
       - uses: aws-actions/configure-aws-credentials@v5
@@ -98,6 +135,7 @@ jobs:
         run: |
           curl -fsS --retry 6 --retry-delay 10 --retry-all-errors "$URL/api/health" | tee health.json
           python -c "import json; h = json.load(open('health.json')); assert h['ok'] and h['mode'] == 'public' and h['progress'] == 'poll', h"
+          python -c "import json; s = json.load(open('health.json'))['semgrep']; assert s['available'] and s['engine'] == 'community' and not s['pro_allowed'], s"
           curl -fsS --retry 3 --retry-delay 10 --retry-all-errors -o /dev/null "$URL/how-it-works"
           if ! python -c "import json, sys; sys.exit(0 if json.load(open('health.json'))['configured'] else 1)"; then
             echo "::warning::The model API key isn't set yet. Create the SSM parameter (see README) and the site picks it up within a minute."

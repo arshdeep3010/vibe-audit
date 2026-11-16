@@ -1,0 +1,9 @@
+**/__pycache__
+**/*.pyc
+tests
+rules/tests
+data
+smoke_test.py
+scan_cli.py
+requirements.txt
+requirements-dev.txt

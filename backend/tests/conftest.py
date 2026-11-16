@@ -1,6 +1,7 @@
 """Shared fixtures. No test calls a real model: a FakeLLM answers with canned JSON."""
 from __future__ import annotations
 
+import re
 import sys
 from pathlib import Path
 
@@ -26,10 +27,21 @@ class FakeLLM:
         system = messages[0]["content"]
         if "verify" in system.lower() and "verdicts" in system:
             self.calls.append("verify_batch")
-            return {"verdicts": [
+            self.last_verify = messages[1]["content"]
+            verdicts = [
                 {"id": 1, "verdict": "confirmed", "confidence": 0.95},
                 {"id": 2, "verdict": "dropped", "confidence": 0.2},
-            ]}
+            ]
+            # Scanner findings (listed after the model's own): keep them unless titled "noise".
+            items = re.findall(r"^(\d+)\. \[.*?\] \((.*?)\) lines \S+: (.*?) —", self.last_verify, re.M)
+            for num, origin, title in items:
+                if int(num) > 2 and origin.startswith("scanner"):
+                    noise = "noise" in title
+                    verdicts.append({"id": int(num), "verdict": "dropped" if noise else "confirmed",
+                                     "confidence": 0.2 if noise else 0.9,
+                                     "reason": "Only a constant reaches it." if noise else "Reachable from the request.",
+                                     "impact": "An attacker controls the query.", "fix": "Use placeholders."})
+            return {"verdicts": verdicts}
         if "TRUE POSITIVE" in system:
             self.calls.append("verify_one")
             return {"verdict": "confirmed", "confidence": 0.9}
@@ -53,6 +65,14 @@ class FakeLLM:
             ],
             "profile": {"app_type": "Express API", "frameworks": ["Express", "mysql"]},
         }
+
+
+@pytest.fixture(autouse=True)
+def no_real_semgrep(monkeypatch):
+    """Keep tests fast and machine-independent: semgrep only runs in tests that ask for it,
+    and a token in your .env never leaks into a test."""
+    monkeypatch.setattr(settings, "enable_semgrep", False)
+    monkeypatch.setattr(settings, "semgrep_app_token", "")
 
 
 @pytest.fixture

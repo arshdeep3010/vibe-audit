@@ -86,6 +86,9 @@ class Finding(BaseModel):
     source: Source = Source.llm
     cwe: str | None = None
     verdict: Verdict = Verdict.unverified
+    rule_id: str | None = None           # scanner rule that fired (semgrep / bandit test id)
+    judge_note: str = ""                 # the model's one-line reason when it judged this finding
+    corroborated_by: list[str] = Field(default_factory=list)  # other sources reporting the same issue
 
     @property
     def rank(self) -> float:
@@ -134,6 +137,7 @@ class ScanResult(BaseModel):
     repo_map: RepoMap | None = None
     triage: Triage | None = None
     findings: list[Finding] = Field(default_factory=list)
+    dismissed: list[Finding] = Field(default_factory=list)  # scanner hits the model judged false
     risk_score: int = 0      # 0 (safe) .. 100 (very risky)
     risk_grade: str = "?"    # A..F
     counts: dict = Field(default_factory=dict)

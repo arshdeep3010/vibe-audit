@@ -64,15 +64,17 @@ async def run_scan(
             result.timings["total_s"] = round(time.perf_counter() - t0, 1)
             return result
 
-        # Phase 3 — deterministic pre-pass (secret scan + bandit/semgrep when installed).
+        # Phase 3 — deterministic pre-pass (secret scan, bandit, semgrep).
         # Runs off-loop; it uses subprocesses and must not touch the progress queue from a thread.
         det_findings: list[Finding] = []
         hotspots: set[str] = set()
         if settings.enable_deterministic:
             t_det = time.perf_counter()
             log("deterministic", "Running deterministic scanners (secrets, bandit, semgrep)...")
-            det_findings, hotspots = await asyncio.to_thread(run_deterministic, repo)
+            det_findings, hotspots, notes = await asyncio.to_thread(run_deterministic, repo)
             result.timings["deterministic_s"] = round(time.perf_counter() - t_det, 1)
+            for note in notes:
+                log("deterministic", note)
             log("deterministic",
                 f"{len(det_findings)} deterministic finding(s) across {len(hotspots)} hotspot file(s).")
 
@@ -80,7 +82,7 @@ async def run_scan(
         astats = AnalysisStats()
         llm_findings, triage = await run_static_analysis(
             repo, llm=llm, progress=progress, hotspots=hotspots, stats=astats,
-            skip_triage=workspace.meta.kind == "paste",
+            skip_triage=workspace.meta.kind == "paste", hints=det_findings,
         )
         result.triage = triage
         result.timings["static_s"] = round(time.perf_counter() - t_static, 1)
@@ -96,7 +98,8 @@ async def run_scan(
 
         findings = llm_findings + det_findings
 
-        # Phase 3 — LLM verification pass (false-positive filtering on high/critical LLM findings).
+        # Phase 3 — LLM verification pass: high/critical LLM findings, plus every bandit and
+        # semgrep finding (the model confirms or drops each and explains impact and fix).
         if settings.enable_verification:
             t_verify = time.perf_counter()
             findings = await verify_findings(findings, repo, llm=llm, progress=progress)
@@ -121,8 +124,13 @@ async def run_scan(
         result.risk_score = agg["risk_score"]
         result.risk_grade = agg["risk_grade"]
         result.counts = agg["counts"]
-        if agg.get("dropped"):
+        if agg["dropped"]:
             result.counts["dropped_false_positives"] = agg["dropped"]
+        if agg["merged"]:
+            result.counts["merged_duplicates"] = agg["merged"]
+        result.dismissed = agg["dismissed"]
+        if agg["dismissed"]:
+            result.counts["scanner_dismissed"] = len(agg["dismissed"])
         if astats.failed:
             result.counts["failed_segments"] = astats.failed
             result.counts["total_segments"] = astats.units

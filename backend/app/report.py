@@ -3,7 +3,14 @@ from __future__ import annotations
 
 import html
 
-from app.models.findings import ScanResult
+from app.models.findings import Finding, ScanResult
+
+
+def _origin(f: Finding) -> str:
+    """Which tool(s) reported a finding, e.g. "semgrep js-sql-built-from-strings" or "model + semgrep"."""
+    if f.source.value == "llm":
+        return " + ".join(["model", *f.corroborated_by])
+    return f"{f.source.value} {f.rule_id}".strip() if f.rule_id else f.source.value
 
 _SEV_BORDER = {
     "critical": "#dc2626",
@@ -38,7 +45,6 @@ def to_markdown(res: ScanResult) -> str:
 
     if not res.findings:
         add("_No findings._")
-        return "\n".join(out)
 
     for f in res.findings:
         loc = f":{f.line_start}" if f.line_start else ""
@@ -46,6 +52,9 @@ def to_markdown(res: ScanResult) -> str:
         meta = f"`{f.category.value}` · `{f.file}{loc}` · confidence {int(f.confidence * 100)}%"
         if f.cwe:
             meta += f" · {f.cwe}"
+        meta += f" · found by {_origin(f)}"
+        if f.verdict.value in ("confirmed", "plausible"):
+            meta += f" · {f.verdict.value}"
         add(meta)
         add("")
         if f.description:
@@ -54,11 +63,20 @@ def to_markdown(res: ScanResult) -> str:
             add(f"**Impact:** {f.impact}")
         if f.recommendation:
             add(f"**Fix:** {f.recommendation}")
+        if f.judge_note:
+            add(f"**Model's verdict:** {f.judge_note}")
         if f.code_snippet:
             add("")
             add("```")
             add(f.code_snippet)
             add("```")
+        add("")
+    if res.dismissed:
+        add("## Scanner hits dismissed by the model")
+        add("")
+        for d in res.dismissed:
+            loc = f":{d.line_start}" if d.line_start else ""
+            add(f"- **{d.title}** · `{d.file}{loc}` · {_origin(d)} — {d.judge_note or 'dropped by verification'}")
         add("")
     return "\n".join(out)
 
@@ -79,15 +97,25 @@ def to_html(res: ScanResult) -> str:
     <span class="pill">{f.category.value}</span>
     <span class="loc">{html.escape(f.file)}{loc}</span>
     <span class="pill">{int(f.confidence * 100)}%</span>{cwe}
+    <span class="pill">{html.escape(_origin(f))}</span>
   </div>
   <h3>{html.escape(f.title)}</h3>
   {f'<p><b>What:</b> {html.escape(f.description)}</p>' if f.description else ''}
   {f'<p><b>Impact:</b> {html.escape(f.impact)}</p>' if f.impact else ''}
   {f'<p><b>Fix:</b> {html.escape(f.recommendation)}</p>' if f.recommendation else ''}
+  {f"<p><b>Model's verdict:</b> {html.escape(f.judge_note)}</p>" if f.judge_note else ''}
   {snippet}
 </div>"""
         )
     body = "\n".join(cards) or "<p>No findings.</p>"
+    if res.dismissed:
+        items = "".join(
+            f"<li><b>{html.escape(d.title)}</b> · <span class='loc'>{html.escape(d.file)}"
+            f"{':' + str(d.line_start) if d.line_start else ''}</span> · {html.escape(_origin(d))} — "
+            f"{html.escape(d.judge_note or 'dropped by verification')}</li>"
+            for d in res.dismissed
+        )
+        body += f"<h2>Scanner hits dismissed by the model</h2><ul>{items}</ul>"
     c = res.counts or {}
     sev = c.get("by_severity", {})
     chips = " ".join(

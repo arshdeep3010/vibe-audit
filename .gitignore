@@ -37,3 +37,6 @@ terraform.tfvars
 
 # Windows / OneDrive
 desktop.ini
+
+# Semgrep in its own environment (see README)
+.venv-semgrep/

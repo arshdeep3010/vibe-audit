@@ -80,6 +80,7 @@ def build_analysis_messages(
     is_chunk: bool,
     triage: Triage | None,
     want_profile: bool = False,
+    hints: list[str] | None = None,
 ) -> list[dict]:
     app_type = (triage.app_type if triage else "") or "unknown"
     frameworks = ", ".join(triage.frameworks) if triage and triage.frameworks else "unknown"
@@ -88,13 +89,22 @@ def build_analysis_messages(
         f"Project: {app_type} | frameworks: {frameworks}\n"
         f"File: {path} (showing lines {start}-{end}){chunk_note}\n\n"
         f"Numbered code:\n{numbered_code}\n\n"
-        f"Audit this code and return the JSON."
     )
+    if hints:
+        user += HINTS_HEADER + "\n" + "\n".join(f"- {h}" for h in hints) + "\n\n"
+    user += "Audit this code and return the JSON."
     contract = OUTPUT_CONTRACT + ("\n\n" + PROFILE_CONTRACT if want_profile else "")
     return [
         {"role": "system", "content": ANALYSIS_SYSTEM + "\n\n" + contract},
         {"role": "user", "content": user},
     ]
+
+
+HINTS_HEADER = (
+    "Static scanners (semgrep, bandit, secret scan) flagged these lines. Scanners match "
+    "patterns and over-report: check each against the code, report the real ones with your "
+    "own impact and fix, and ignore the rest. Also look for anything they missed."
+)
 
 
 # Used instead of a separate triage call when auditing a single snippet.
@@ -107,29 +117,29 @@ Also add a top-level "profile" key describing the code itself:
 # --------------------------------------------------------------------------- #
 # Verification (Phase 3 — false-positive filtering)
 # --------------------------------------------------------------------------- #
-VERIFY_SYSTEM = """\
-You verify whether a reported code issue is a TRUE POSITIVE. Given the finding and the \
-actual code, decide if it is real, reachable, and correctly described. Be skeptical of \
-false positives from automated reviewers.
+VERIFY_SYSTEM = """You verify whether a reported code issue is a TRUE POSITIVE. Given the finding and the actual code, decide if it is real, reachable, and correctly described. Be skeptical of false positives from automated reviewers and pattern-matching scanners.
 
-Output ONLY JSON: {"verdict":"confirmed|plausible|dropped","confidence":<0.0-1.0>,\
-"reason":"<one sentence>"}."""
+Output ONLY JSON: {"verdict":"confirmed|plausible|dropped","confidence":<0.0-1.0>,"reason":"<one sentence>","impact":"<concrete consequence in this code>","fix":"<the specific change to make>"}."""
 
 
-VERIFY_BATCH_SYSTEM = """\
-You verify whether reported code issues are TRUE POSITIVES. For EACH numbered finding, decide \
-from the actual code whether it is real, reachable, and correctly described. Be skeptical of \
-false positives from automated reviewers, but do not drop real issues.
+VERIFY_BATCH_SYSTEM = """You verify whether reported code issues are TRUE POSITIVES. Some come from an AI reviewer, some from static scanners (semgrep, bandit) that match code patterns and over-report. For EACH numbered finding, decide from the actual code whether it is real, reachable, and correctly described. Be skeptical of false positives, but do not drop real issues.
 
-Output ONLY JSON: {"verdicts":[{"id":<finding number>,"verdict":"confirmed|plausible|dropped",\
-"confidence":<0.0-1.0>,"reason":"<one sentence>"}]} with one entry per finding."""
+For findings marked "scanner", also write "impact" (the concrete consequence in THIS code, not a generic description) and "fix" (the specific change to make here).
+
+Output ONLY JSON: {"verdicts":[{"id":<finding number>,"verdict":"confirmed|plausible|dropped","confidence":<0.0-1.0>,"reason":"<one sentence>","impact":"<scanner findings>","fix":"<scanner findings>"}]} with one entry per finding."""
+
+
+def _origin(f: Finding) -> str:
+    if f.source.value == "llm":
+        return "AI reviewer"
+    return f"scanner: {f.source.value}" + (f" rule {f.rule_id}" if f.rule_id else "")
 
 
 def build_verify_batch_messages(findings: list[Finding], path: str, numbered_code: str) -> list[dict]:
     """One call that checks every finding in a file (instead of one call per finding)."""
     items = "\n".join(
-        f"{i}. [{f.severity.value} {f.category.value}] lines {f.line_start}-{f.line_end}: "
-        f"{f.title} — {f.description}"
+        f"{i}. [{f.severity.value} {f.category.value}] ({_origin(f)}) lines "
+        f"{f.line_start}-{f.line_end}: {f.title} — {f.description}"
         for i, f in enumerate(findings, start=1)
     )
     user = (
@@ -144,7 +154,7 @@ def build_verify_batch_messages(findings: list[Finding], path: str, numbered_cod
 
 def build_verify_messages(finding: Finding, numbered_code: str) -> list[dict]:
     user = (
-        f"Reported issue:\n"
+        f"Reported issue ({_origin(finding)}):\n"
         f"- title: {finding.title}\n"
         f"- category: {finding.category.value} | severity: {finding.severity.value}\n"
         f"- file: {finding.file} lines {finding.line_start}-{finding.line_end}\n"

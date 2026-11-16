@@ -93,8 +93,14 @@ variable "api_memory_mb" {
 }
 
 variable "worker_memory_mb" {
+  # Semgrep's engine needs headroom next to Python; more memory also means more CPU on Lambda.
   type    = number
-  default = 512
+  default = 1024
+}
+
+variable "worker_image_uri" {
+  description = "Worker container image, pinned by digest (<repo>@sha256:...). The pipeline builds and passes it."
+  type        = string
 }
 
 variable "worker_reserved_concurrency" {

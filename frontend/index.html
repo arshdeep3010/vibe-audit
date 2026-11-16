@@ -207,6 +207,16 @@
     .link-btn:hover { color: var(--accent-hi); }
     .form-error { margin: 12px 0 0; padding: 10px 13px; border-radius: 10px; font-size: 13px; line-height: 1.5;
       background: rgba(239,127,122,0.07); border: 1px solid rgba(239,127,122,0.3); color: var(--ink); }
+    .stack { display: flex; flex-wrap: wrap; gap: 6px; margin-top: 14px; }
+    .stack .chip { text-transform: none; letter-spacing: 0; font-size: 11.5px; padding: 3px 9px; }
+    .stack .chip.locked { border-style: dashed; color: var(--ink-4); }
+    .stack .chip.locked::before { content: "🔒 "; }
+    .dismissed { margin-top: 18px; }
+    .dismissed summary { cursor: pointer; font-size: 13px; color: var(--ink-2); padding: 10px 0; }
+    .dismissed ul { list-style: none; margin: 0; padding: 0; display: grid; gap: 8px; }
+    .dismissed li { font-size: 13px; color: var(--ink-2); line-height: 1.5; padding: 10px 14px; border: 1px dashed var(--line-2); border-radius: var(--r-md); }
+    .dismissed li b { color: var(--ink); font-weight: 500; }
+    .judge { font-size: 13px; color: var(--ink-2); }
     .fine { margin-top: 14px; font-size: 12px; color: var(--ink-3); line-height: 1.6; }
     .fine b { color: var(--ink); font-weight: 500; }
 
@@ -677,6 +687,18 @@
               </button>
             </div>
 
+            <div class="stack" :style="!isPublic && 'margin:0 0 18px'" aria-label="What this audit runs">
+              <span class="chip">Secret scan</span>
+              <span class="chip">bandit</span>
+              <span class="chip" x-show="semgrep.available" x-text="semgrep.engine === 'pro' ? 'Semgrep Pro' : 'Semgrep · ' + semgrepRules"></span>
+              <span class="chip live">LLM audit</span>
+              <span class="chip live">Verification</span>
+              <span class="chip locked" x-show="isPublic" title="Semgrep's Pro engine and Registry rules may only be used on your own code, so they run when you self-host VibeAudit with your Semgrep token.">Semgrep Pro · self-hosted only</span>
+              <span class="chip locked" x-show="isPublic" title="Running visitors' code would be unsafe on a shared server. Deep scans boot your app in Docker when you self-host.">Docker sandbox · self-hosted only</span>
+              <span class="chip" x-show="!isPublic && form.depth === 'deep'">Docker sandbox</span>
+              <span class="chip off" x-show="!isPublic && semgrep.available && semgrep.engine !== 'pro'" :title="semgrep.note">Semgrep Pro · add token</span>
+            </div>
+
             <button class="btn-primary run-btn" :style="isPublic && 'margin-top:18px'" @click="start()" :disabled="!cfg.configured || !inputValue.trim() || overLimit || starting">
               <span x-text="starting ? 'Starting…' : 'Run audit'"></span>
               <svg class="arr" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><path d="M5 12h14M13 6l6 6-6 6"/></svg>
@@ -844,6 +866,8 @@
                 <span class="meta" x-show="result.triage && result.triage.app_type" x-text="result.triage && result.triage.app_type"></span>
                 <span class="meta tnum" x-show="result.timings && result.timings.total_s" x-text="(result.timings && result.timings.total_s) + 's'"></span>
                 <span class="meta ok" x-show="result.counts && result.counts.dropped_false_positives"><span x-text="result.counts && result.counts.dropped_false_positives"></span> false positives filtered</span>
+                <span class="meta" x-show="result.counts && result.counts.merged_duplicates" title="Findings reported by more than one tool, or twice by the same tool, were merged into one."><span x-text="result.counts && result.counts.merged_duplicates"></span> duplicates merged</span>
+                <span class="meta ok" x-show="result.counts && result.counts.scanner_dismissed"><span x-text="result.counts && result.counts.scanner_dismissed"></span> scanner hits dismissed by the model</span>
               </div>
               <div class="sevbar" x-show="total">
                 <template x-for="(s, i) in sevOrder" :key="s">
@@ -920,7 +944,8 @@
                       <span x-show="f.cwe" x-text="f.cwe"></span>
                       <span class="ok" x-show="f.verdict==='confirmed'">✓ Verified</span>
                       <span x-show="f.verdict==='plausible'">Plausible</span>
-                      <span x-show="f.source && f.source!=='llm'" class="mono" x-text="f.source"></span>
+                      <span x-show="f.source && f.source!=='llm'" class="mono" x-text="f.source + (f.rule_id ? ' · ' + f.rule_id : '')"></span>
+                      <span x-show="f.source==='llm' && f.corroborated_by && f.corroborated_by.length" class="mono" :title="f.rule_id ? 'Rule ' + f.rule_id : ''" x-text="'model + ' + (f.corroborated_by || []).join(' + ')"></span>
                     </div>
                   </span>
                   <span class="chev"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round"><path d="m9 6 6 6-6 6"/></svg></span>
@@ -929,6 +954,7 @@
                   <div class="fdetail">
                     <div x-show="f.description"><h6 class="label-sm">What's wrong</h6><span x-text="f.description"></span></div>
                     <div x-show="f.impact"><h6 class="label-sm">Impact</h6><span x-text="f.impact"></span></div>
+                    <div x-show="f.judge_note"><h6 class="label-sm">Model's verdict</h6><span class="judge" x-text="(f.verdict === 'confirmed' ? 'Confirmed: ' : f.verdict === 'plausible' ? 'Plausible: ' : '') + f.judge_note"></span></div>
                     <div class="fix" x-show="f.recommendation">
                       <button class="copy" @click="copy(f.recommendation, f.id)" x-text="copied===f.id ? 'Copied' : 'Copy'"></button>
                       <h6 class="label-sm">Suggested fix</h6><span x-text="f.recommendation"></span>
@@ -941,6 +967,15 @@
             <div class="panel empty" x-show="total && !visibleFindings.length">No findings match the current filters.</div>
             <div class="panel clean" x-show="!total && !failedSegs"><b>Spotless.</b><span style="color:var(--ink-2)">No issues were found in this codebase.</span></div>
           </div>
+
+          <details class="dismissed" x-show="result.dismissed && result.dismissed.length">
+            <summary><span x-text="(result.dismissed || []).length"></span> scanner hit(s) the model judged to be false positives</summary>
+            <ul>
+              <template x-for="d in (result.dismissed || [])" :key="d.id">
+                <li><b x-text="d.title"></b> · <span class="mono" x-text="d.file + (d.line_start ? ':' + d.line_start : '')"></span> · <span class="mono" x-text="d.source + (d.rule_id ? ' · ' + d.rule_id : '')"></span><br><span x-text="d.judge_note || 'Dropped by the verification pass.'"></span></li>
+              </template>
+            </ul>
+          </details>
         </div>
       </template>
     </section>
@@ -967,9 +1002,9 @@
       <!-- Pipeline -->
       <div class="how-sec">
         <span class="kicker"><i></i>The pipeline</span>
-        <h3><span x-text="isPublic ? 'Seven' : 'Eight'"></span> steps, <span class="serif" x-text="isPublic ? 'two of them think.' : 'three of them think.'"></span></h3>
+        <h3><span x-text="['Zero','One','Two','Three','Four','Five','Six','Seven','Eight','Nine','Ten'][howSteps.length] || howSteps.length"></span> steps, <span class="serif" x-text="isPublic ? 'two of them think.' : 'three of them think.'"></span></h3>
         <p class="sub" x-text="isPublic
-          ? 'Most steps are plain code and cost nothing. Only the audit and the verification call the model. Pick a step to see what it does.'
+          ? 'Most steps are plain code and cost nothing. Only the audit and the verification call the model. Steps marked self-hosted only run when you host VibeAudit yourself. Pick a step to see what it does.'
           : 'Most steps are plain code and cost nothing. Only triage, the audit and the verification call the model. Pick a step to see what it does.'"></p>
 
         <div class="pipe">
@@ -983,7 +1018,9 @@
                       <span x-text="s.t"></span>
                       <span class="chip live" x-show="s.ai && !(isPublic && s.skipSnippet)">Model call</span>
                       <span class="chip off" x-show="isPublic && s.skipSnippet">Skipped for snippets</span>
-                      <span class="chip" x-show="s.localOnly">Deep only</span>
+                      <span class="chip off" x-show="isPublic && s.localOnly">Self-hosted only</span>
+                      <span class="chip" x-show="!isPublic && s.deepOnly">Deep only</span>
+                      <span class="chip" x-show="!isPublic && s.needsToken">Needs token</span>
                     </span>
                     <span class="pd" x-text="isPublic && s.ps ? s.ps : s.s"></span>
                   </span>
@@ -1379,10 +1416,10 @@ const VA3D = (() => {
 const STEPS = [
   { id: 'ingest',        title: 'Reading input',          desc: 'Loading the folder, repository or snippet' },
   { id: 'map',           title: 'Mapping the codebase',   desc: 'Discovering, filtering and chunking files' },
-  { id: 'deterministic', title: 'Deterministic scanners', desc: 'Secrets, bandit and semgrep pre-pass' },
+  { id: 'deterministic', title: 'Deterministic scanners', desc: 'Secret scan, bandit and Semgrep rules' },
   { id: 'triage',        title: 'Understanding the app',  desc: 'Stack, risk areas and hotspots' },
   { id: 'analyze',       title: 'Deep code audit',        desc: 'Security, logic and quality, file by file' },
-  { id: 'verify',        title: 'Verifying findings',     desc: 'Second pass to drop false positives' },
+  { id: 'verify',        title: 'Verifying findings',     desc: 'Drops false positives and judges scanner hits' },
   { id: 'dynamic',       title: 'Runtime sandbox',        desc: 'Booting the app in Docker to catch crashes', deepOnly: true },
   { id: 'aggregate',     title: 'Ranking & grading',      desc: 'De-duplicating and scoring every issue' },
   { id: 'done',          title: 'Report ready',           desc: 'Your graded audit is assembled' },
@@ -1406,10 +1443,16 @@ const HOW_STEPS = [
     loc: 'Walks the files, skips dependencies, build output, lock files and binaries, detects each language and ranks files by how likely they are to matter. Files over 350 lines are split into overlapping segments, up to 40 files and 6 segments per file.',
     why: 'The model reads best in focused chunks. The 30-line overlap means a bug that straddles a boundary is still seen whole.',
     exLabel: 'Example · the sample', ex: 'server.js   javascript   89 lines\nsegments    1   (lines 1–89)' },
-  { id: 'deterministic', t: 'Pattern scan', s: 'Catch leaked keys without a model', ai: false, cost: 'No model call', where: 'Runs on the server',
-    loc: 'Regular expressions look for credentials: AWS, Stripe, OpenAI, GitHub, Google, Slack and NVIDIA keys, JSON Web Tokens and private-key blocks. When installed, bandit (Python) and semgrep add rule-based security checks.',
-    why: 'Leaked keys follow fixed formats, so a pattern finds them faster and more reliably than a model. The key is masked before it reaches the report.',
-    exLabel: 'Example · the sample', ex: 'CRITICAL  Stripe/OpenAI-style secret key\n          server.js:10   sk_l***tUs3' },
+  { id: 'deterministic', t: 'Pattern scan', s: 'Secrets, bandit and Semgrep, no model', ai: false, cost: 'No model call', where: 'Runs on the server',
+    pub: 'Three scanners run before any model call. Regular expressions catch leaked credentials (AWS, Stripe, OpenAI, GitHub, Google, Slack and NVIDIA keys, JWTs, private keys). bandit checks Python. Semgrep runs VibeAudit\'s own rule pack of 42 tested rules for JavaScript, TypeScript and Python: SQL and command injection, XSS, path traversal, SSRF, unverified JWTs, hard-coded secrets, async forEach and more. Every hit is handed to the audit as a hint and judged by the model later.',
+    loc: 'Three scanners run before any model call. Regular expressions catch leaked credentials. bandit checks Python. Semgrep runs VibeAudit\'s own 42-rule pack plus the Semgrep Registry\'s p/default rules, and switches to the Pro engine (cross-function analysis and Pro rules) when SEMGREP_APP_TOKEN is set. Every hit is handed to the audit as a hint and judged by the model later.',
+    why: 'Patterns are fast, free and repeatable, and they find what a model can skim past. They also over-report, which is why the model judges every hit instead of trusting it.',
+    exLabel: 'Example · the sample', ex: 'secret scan   1 finding\nsemgrep       15 findings  (community engine · VibeAudit rules)\n  js-sql-built-from-strings     server.js:22\n  js-command-injection          server.js:54\n  js-jwt-decode-without-verify  server.js:36' },
+  { id: 'semgrep-pro', t: 'Semgrep Pro', s: 'Cross-function analysis with your token', ai: false, localOnly: true, needsToken: true, cost: 'No model call', where: 'Your machine, with your Semgrep token',
+    pub: 'Not available on this demo. Semgrep\'s Pro engine and Registry rules may only be used on your own code, not offered to others as a service. When you self-host VibeAudit and set SEMGREP_APP_TOKEN, the scan switches to the Pro engine: it follows data across functions, adds Semgrep\'s Pro rules and the Registry\'s p/default pack. Results stay on your machine; nothing is uploaded to Semgrep.',
+    loc: 'With SEMGREP_APP_TOKEN set in .env, Semgrep runs as `semgrep scan --pro`: cross-function data-flow analysis, Semgrep\'s Pro rules and the Registry\'s p/default pack, on top of VibeAudit\'s own rules. Results stay on your machine; nothing is uploaded to Semgrep. If the Pro engine is missing, the scan falls back to the community engine and says so in the log.',
+    why: 'Single-function rules miss a request value that is passed through two helpers before reaching a query. The Pro engine follows it.',
+    exLabel: 'Example · log line', ex: 'semgrep (Pro engine; VibeAudit rules, Registry p/default, Pro rules): 23 finding(s)' },
   { id: 'triage', t: 'Understand the app', s: 'Stack, entry points and risk areas', ai: true, skipSnippet: true, cost: '1 model call per scan', where: 'Model provider',
     pub: 'Skipped for snippets. Instead of a separate call, the audit returns a short profile of the code (what it is and which libraries it uses) along with its findings. That saves one model call per scan.',
     loc: 'One model call reads the file tree, manifests such as package.json and the start of key files, then describes the app: what it is, its frameworks, how it runs and where bugs are most likely to hide. The audit uses this profile as context. Snippets skip this call: the audit returns the profile instead.',
@@ -1420,10 +1463,11 @@ const HOW_STEPS = [
     why: 'Asking for exact lines and a fix forces specific, checkable claims instead of generic advice.',
     exLabel: 'Example · one finding from the sample', ex: '{\n  "title": "SQL injection in login endpoint",\n  "severity": "critical",\n  "category": "security",\n  "line_start": 22,\n  "cwe": "CWE-89",\n  "confidence": 1.0,\n  "recommendation": "Use parameterized queries ..."\n}' },
   { id: 'verify', t: 'Verify findings', s: 'A sceptical second look at serious issues', ai: true, cost: '1 model call per file', where: 'Model provider',
-    loc: 'Every high and critical finding from the model is re-checked against the actual code by a second prompt whose job is to disprove it. All findings in a file are checked in one call. Each gets a verdict (confirmed, uncertain or dropped), and dropped ones never reach the report.',
-    why: 'Models over-report. A pass that argues the other side removes most false alarms before they cost you time.',
+    loc: 'A second prompt, whose job is to disprove things, re-checks every high and critical finding from the model and judges every Semgrep and bandit hit against the actual code. All findings in a file are checked in one call. Each gets a verdict (confirmed, uncertain or dropped) and a one-line reason; for scanner hits the model also writes the impact and the fix for this code. Dropped model findings never reach the report; dismissed scanner hits are listed separately with the reason.',
+    why: 'Models and pattern scanners both over-report. A pass that argues the other side removes most false alarms before they cost you time.',
     exLabel: 'Example · reply shape', ex: '{"verdicts": [\n  {"id": "f1", "verdict": "confirmed", "confidence": 1.0,\n   "reason": "username is interpolated into the SQL string"},\n  {"id": "f7", "verdict": "dropped", "confidence": 0.2,\n   "reason": "the value is validated two lines earlier"}\n]}' },
-  { id: 'dynamic', t: 'Runtime sandbox', s: 'Boot the app in Docker', ai: false, localOnly: true, cost: 'No model call', where: 'Docker on your machine',
+  { id: 'dynamic', t: 'Runtime sandbox', s: 'Boot the app in Docker', ai: false, localOnly: true, deepOnly: true, cost: 'No model call', where: 'Docker on your machine',
+    pub: 'Not available on this demo: running other people\'s code on a shared server would be unsafe. When you self-host VibeAudit, a Deep scan builds and starts the app in a locked-down Docker container (memory, CPU and process limits, port bound to localhost), probes its HTTP routes and, with Playwright installed, loads pages in a headless browser to catch console errors. Build and boot failures become findings.',
     loc: 'Deep scans only. The app is built and started in a Docker container and its HTTP routes are probed. When Playwright is installed, a headless browser loads the pages to catch console errors and uncaught exceptions. Build and boot failures become findings too.',
     why: 'Some bugs only exist when the code runs: a crash on start-up, a missing environment variable, a page that throws in the browser.',
     exLabel: 'Example · illustrative', ex: 'docker build   ✓\nboot           ✓  listening on :3000\nGET /          500  TypeError: Cannot read properties of undefined' },
@@ -1504,7 +1548,9 @@ function scanApp() {
     },
 
     /* ---------- how it works ---------- */
-    get howSteps() { return HOW_STEPS.filter(s => !(this.isPublic && s.localOnly)); },
+    get howSteps() { return HOW_STEPS; },
+    get semgrep() { return this.cfg.semgrep || { available: false, engine: '', rulesets: [], note: '' }; },
+    get semgrepRules() { return (this.semgrep.rulesets || []).join(' + ') || 'rules'; },
     get howCur() { return this.howSteps[this.howStep] || this.howSteps[0]; },
     howCost(s) { return this.isPublic && s.skipSnippet ? 'No model call for snippets' : s.cost; },
     howFree(s) { return !s.ai || (this.isPublic && s.skipSnippet); },

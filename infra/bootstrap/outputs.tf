@@ -8,6 +8,11 @@ output "deploy_role_arn" {
   value       = aws_iam_role.deploy.arn
 }
 
+output "worker_repository_url" {
+  description = "ECR repository the pipeline pushes the worker image to."
+  value       = aws_ecr_repository.worker.repository_url
+}
+
 output "region" {
   description = "Set as the GitHub variable AWS_REGION."
   value       = var.region

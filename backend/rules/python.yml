@@ -1,0 +1,509 @@
+# VibeAudit's own Semgrep rules for Python (Flask, Django, FastAPI and plain scripts).
+# Written for this project; tests live in tests/python.py.
+# bandit also runs on Python, so these focus on web-app bugs and on logic bugs bandit skips.
+
+rules:
+  # ------------------------------------------------------------------ injection
+  - id: py-sql-built-from-strings
+    languages: [python]
+    severity: ERROR
+    message: >-
+      SQL text is built with an f-string, % formatting, .format() or +. If any part comes from
+      a request, an attacker can rewrite the query. Pass values as parameters:
+      cursor.execute("... WHERE id = %s", (user_id,)).
+    metadata:
+      title: SQL query built from strings
+      category: security
+      vibeaudit-severity: critical
+      cwe: "CWE-89: SQL Injection"
+      confidence: MEDIUM
+    patterns:
+      - pattern-either:
+          - pattern: $CUR.$EXEC(f"...", ...)
+          - pattern: $CUR.$EXEC("..." % $X, ...)
+          - pattern: $CUR.$EXEC("...".format(...), ...)
+          - pattern: $CUR.$EXEC("..." + $X, ...)
+          - pattern: |
+              $Q = f"..."
+              ...
+              $CUR.$EXEC($Q, ...)
+          - pattern: |
+              $Q = "..." % $X
+              ...
+              $CUR.$EXEC($Q, ...)
+          - pattern: |
+              $Q = "...".format(...)
+              ...
+              $CUR.$EXEC($Q, ...)
+          - pattern: |
+              $Q = "..." + $X
+              ...
+              $CUR.$EXEC($Q, ...)
+      - metavariable-regex:
+          metavariable: $EXEC
+          regex: ^(execute|executemany|executescript|raw|exec_driver_sql)$
+      - pattern-not: $CUR.$EXEC(f"{$C}", ...)
+
+  - id: py-command-injection
+    mode: taint
+    languages: [python]
+    severity: ERROR
+    message: >-
+      Request data reaches a shell command, so a value like "; rm -rf /" runs as its own
+      command. Call subprocess.run with a list of arguments and shell=False.
+    metadata:
+      title: Request data runs in a shell command
+      category: security
+      vibeaudit-severity: critical
+      cwe: "CWE-78: OS Command Injection"
+      confidence: HIGH
+    pattern-sources: &py_request_sources
+      - pattern: request.args
+      - pattern: request.form
+      - pattern: request.values
+      - pattern: request.json
+      - pattern: request.get_json(...)
+      - pattern: request.cookies
+      - pattern: request.headers
+      - pattern: request.GET
+      - pattern: request.POST
+      - pattern: request.query_params
+    pattern-sinks:
+      - patterns:
+          - pattern-either:
+              - pattern: os.system($CMD)
+              - pattern: os.popen($CMD, ...)
+              - pattern: subprocess.$F($CMD, ..., shell=True, ...)
+          - focus-metavariable: $CMD
+    pattern-sanitizers:
+      - pattern: shlex.quote(...)
+
+  - id: py-shell-true-with-variable
+    languages: [python]
+    severity: WARNING
+    message: >-
+      A shell command is built from a variable and run with shell=True or os.system. If the
+      value can come from outside, it can add its own commands. Pass a list of arguments
+      with shell=False.
+    metadata:
+      title: Shell command built from a variable
+      category: security
+      vibeaudit-severity: high
+      cwe: "CWE-78: OS Command Injection"
+      confidence: MEDIUM
+    pattern-either:
+      - patterns:
+          - pattern: subprocess.$F($CMD, ..., shell=True, ...)
+          - pattern-not: subprocess.$F("...", ..., shell=True, ...)
+      - patterns:
+          - pattern: os.system($CMD)
+          - pattern-not: os.system("...")
+
+  - id: py-template-injection
+    mode: taint
+    languages: [python]
+    severity: ERROR
+    message: >-
+      Request data is rendered as a Jinja template, so {{ ... }} in the input runs on the
+      server (often leading to remote code execution). Render a fixed template and pass the
+      value as a variable.
+    metadata:
+      title: Request data rendered as a template (SSTI)
+      category: security
+      vibeaudit-severity: critical
+      cwe: "CWE-1336: Template Injection"
+      confidence: HIGH
+    pattern-sources: *py_request_sources
+    pattern-sinks:
+      - pattern: render_template_string(...)
+      - pattern: jinja2.Template(...)
+      - pattern: Template(...)
+
+  - id: py-reflected-xss
+    mode: taint
+    languages: [python]
+    severity: WARNING
+    message: >-
+      Request data is put into an HTML string returned to the browser without escaping.
+      Escape it (markupsafe.escape) or render it through a template that escapes by default.
+    metadata:
+      title: Request data echoed into HTML (XSS)
+      category: security
+      vibeaudit-severity: high
+      cwe: "CWE-79: Cross-site Scripting"
+      confidence: MEDIUM
+    pattern-sources: *py_request_sources
+    pattern-sinks:
+      - patterns:
+          - pattern: return $BODY
+          - metavariable-regex:
+              metavariable: $BODY
+              regex: (?s)^[fF]?["'][^"']*<[a-zA-Z]
+          - focus-metavariable: $BODY
+      - pattern: make_response(f"...", ...)
+      - pattern: HttpResponse(f"...", ...)
+      - pattern: HTMLResponse(f"...", ...)
+    pattern-sanitizers:
+      - pattern: escape(...)
+      - pattern: markupsafe.escape(...)
+      - pattern: html.escape(...)
+      - pattern: int(...)
+
+  - id: py-path-traversal
+    mode: taint
+    languages: [python]
+    severity: ERROR
+    message: >-
+      Request data is used as a file path, so "../../etc/passwd" walks out of the intended
+      folder. Use werkzeug's safe_join / send_from_directory, or resolve the path and check
+      it stays inside the base directory.
+    metadata:
+      title: Request data used as a file path
+      category: security
+      vibeaudit-severity: high
+      cwe: "CWE-22: Path Traversal"
+      confidence: MEDIUM
+    pattern-sources: *py_request_sources
+    pattern-sinks:
+      - patterns:
+          - pattern-either:
+              - pattern: open($P, ...)
+              - pattern: send_file($P, ...)
+              - pattern: os.remove($P)
+              - pattern: Path($P)
+          - focus-metavariable: $P
+    pattern-sanitizers:
+      - pattern: secure_filename(...)
+      - pattern: os.path.basename(...)
+      - pattern: safe_join(...)
+
+  - id: py-ssrf
+    mode: taint
+    languages: [python]
+    severity: WARNING
+    message: >-
+      The server fetches a URL taken from the request, so attackers can reach internal
+      services or cloud metadata (169.254.169.254). Allow-list the hosts you call.
+    metadata:
+      title: Server fetches a URL from the request (SSRF)
+      category: security
+      vibeaudit-severity: high
+      cwe: "CWE-918: Server-Side Request Forgery"
+      confidence: MEDIUM
+    pattern-sources: *py_request_sources
+    pattern-sinks:
+      - patterns:
+          - pattern-either:
+              - pattern: requests.$M($URL, ...)
+              - pattern: httpx.$M($URL, ...)
+              - pattern: urllib.request.urlopen($URL, ...)
+          - focus-metavariable: $URL
+
+  - id: py-open-redirect
+    mode: taint
+    languages: [python]
+    severity: WARNING
+    message: >-
+      The redirect target comes from the request, so a link to your site can bounce visitors
+      to a phishing page. Only redirect to relative paths or an allow-list of hosts.
+    metadata:
+      title: Redirect target taken from the request
+      category: security
+      vibeaudit-severity: medium
+      cwe: "CWE-601: Open Redirect"
+      confidence: MEDIUM
+    pattern-sources: *py_request_sources
+    pattern-sinks:
+      - patterns:
+          - pattern-either:
+              - pattern: redirect($URL, ...)
+              - pattern: RedirectResponse($URL, ...)
+          - focus-metavariable: $URL
+
+  - id: py-unsafe-deserialization
+    languages: [python]
+    severity: ERROR
+    message: >-
+      pickle/yaml.load/marshal can run code while loading. If the data can come from a user or
+      the network, use json, or yaml.safe_load.
+    metadata:
+      title: Unsafe deserialization
+      category: security
+      vibeaudit-severity: high
+      cwe: "CWE-502: Deserialization of Untrusted Data"
+      confidence: MEDIUM
+    pattern-either:
+      - pattern: pickle.loads(...)
+      - pattern: pickle.load(...)
+      - pattern: marshal.loads(...)
+      - patterns:
+          - pattern: yaml.load(...)
+          - pattern-not: yaml.load(..., Loader=yaml.SafeLoader, ...)
+          - pattern-not: yaml.load(..., Loader=SafeLoader, ...)
+          - pattern-not: yaml.load(..., Loader=yaml.CSafeLoader, ...)
+
+  - id: py-code-eval
+    languages: [python]
+    severity: ERROR
+    message: >-
+      A non-constant string is run as Python code. If it can carry user input, an attacker
+      runs arbitrary code. Use ast.literal_eval for data, or a lookup table for operations.
+    metadata:
+      title: Dynamic code passed to eval/exec
+      category: security
+      vibeaudit-severity: high
+      cwe: "CWE-95: Eval Injection"
+      confidence: MEDIUM
+    pattern-either:
+      - patterns:
+          - pattern: eval($X, ...)
+          - pattern-not: eval("...", ...)
+      - patterns:
+          - pattern: exec($X, ...)
+          - pattern-not: exec("...", ...)
+
+  # ------------------------------------------------------------------ auth, secrets, config
+  - id: py-jwt-signature-not-verified
+    languages: [python]
+    severity: ERROR
+    message: >-
+      The JWT is decoded with signature checking turned off, so anyone can forge a token.
+      Decode with your key and an explicit algorithms list.
+    metadata:
+      title: JWT decoded without verifying the signature
+      category: security
+      vibeaudit-severity: critical
+      cwe: "CWE-347: Improper Verification of Cryptographic Signature"
+      confidence: HIGH
+    pattern-either:
+      - pattern: 'jwt.decode(..., options={..., "verify_signature": False, ...}, ...)'
+      - pattern: jwt.decode(..., verify=False, ...)
+      - pattern: 'jwt.decode(..., algorithms=[..., "none", ...], ...)'
+
+  - id: py-hardcoded-secret-key
+    languages: [python]
+    severity: ERROR
+    message: >-
+      The app's signing secret is written into the code. Anyone with the source can forge
+      sessions or tokens. Load it from an environment variable.
+    metadata:
+      title: Framework secret key hard-coded
+      category: security
+      vibeaudit-severity: high
+      cwe: "CWE-798: Hard-coded Credentials"
+      confidence: HIGH
+    pattern-either:
+      - pattern: $APP.config["SECRET_KEY"] = "..."
+      - pattern: $APP.secret_key = "..."
+      - pattern: SECRET_KEY = "..."
+      - pattern: $APP.config.update(..., SECRET_KEY="...", ...)
+
+  - id: py-hardcoded-credential
+    languages: [python]
+    severity: WARNING
+    message: >-
+      A variable named like a password, secret or token holds a literal value. Move it to an
+      environment variable or a secret manager.
+    metadata:
+      title: Credential-like value hard-coded
+      category: security
+      vibeaudit-severity: medium
+      cwe: "CWE-798: Hard-coded Credentials"
+      confidence: MEDIUM
+    patterns:
+      - pattern: $NAME = "$VAL"
+      - pattern-not: SECRET_KEY = "..."
+      - metavariable-regex:
+          metavariable: $NAME
+          regex: (?i)^.*(password|passwd|secret|api_?key|access_?token|auth_?token|private_?key)$
+      - metavariable-regex:
+          metavariable: $VAL
+          regex: ^(?!(?i:changeme|placeholder|your[-_ ]|xxx|<)).{6,}$
+
+  - id: py-debug-mode-on
+    languages: [python]
+    severity: WARNING
+    message: >-
+      Debug mode is on. Flask's debugger lets anyone who can reach it run code, and Django's
+      debug pages leak settings and source. Turn it off outside development.
+    metadata:
+      title: Debug mode enabled
+      category: security
+      vibeaudit-severity: high
+      cwe: "CWE-489: Active Debug Code"
+      confidence: MEDIUM
+    pattern-either:
+      - pattern: $APP.run(..., debug=True, ...)
+      - pattern: DEBUG = True
+
+  - id: py-tls-verification-disabled
+    languages: [python]
+    severity: ERROR
+    message: >-
+      TLS certificate checks are switched off, so a network attacker can read and change the
+      traffic. Remove verify=False and fix the certificate instead.
+    metadata:
+      title: TLS certificate verification disabled
+      category: security
+      vibeaudit-severity: high
+      cwe: "CWE-295: Improper Certificate Validation"
+      confidence: HIGH
+    pattern-either:
+      - pattern: requests.$M(..., verify=False, ...)
+      - pattern: httpx.$M(..., verify=False, ...)
+      - pattern: ssl._create_unverified_context(...)
+
+  - id: py-cors-any-origin
+    languages: [python]
+    severity: WARNING
+    message: >-
+      CORS allows every origin, so any site can call your API from a visitor's browser. List
+      the origins that should have access.
+    metadata:
+      title: CORS allows any origin
+      category: security
+      vibeaudit-severity: medium
+      cwe: "CWE-942: Permissive Cross-domain Policy"
+      confidence: MEDIUM
+    pattern-either:
+      - pattern: CORS($APP)
+      - pattern: CORS($APP, ..., origins="*", ...)
+      - pattern: 'CORS($APP, ..., resources={..., $R: {..., "origins": "*", ...}, ...}, ...)'
+      - pattern: $APP.add_middleware(CORSMiddleware, ..., allow_origins=["*"], ...)
+
+  - id: py-weak-password-hash
+    languages: [python]
+    severity: ERROR
+    message: >-
+      Passwords hashed with a fast hash (MD5/SHA-1/SHA-256) can be cracked quickly after a
+      leak. Use bcrypt, scrypt, argon2 or werkzeug's generate_password_hash.
+    metadata:
+      title: Password hashed with a fast hash
+      category: security
+      vibeaudit-severity: high
+      cwe: "CWE-916: Weak Password Hash"
+      confidence: MEDIUM
+    patterns:
+      - pattern-either:
+          - pattern: hashlib.$ALG($PW.encode(...))
+          - pattern: hashlib.$ALG($PW)
+      - metavariable-regex:
+          metavariable: $ALG
+          regex: ^(md5|sha1|sha256)$
+      - metavariable-regex:
+          metavariable: $PW
+          regex: (?i).*pass.*
+
+  - id: py-weak-random-token
+    languages: [python]
+    severity: WARNING
+    message: >-
+      The random module is predictable, so a token or password built from it can be guessed.
+      Use the secrets module (secrets.token_urlsafe).
+    metadata:
+      title: random used for a token
+      category: security
+      vibeaudit-severity: medium
+      cwe: "CWE-338: Weak PRNG"
+      confidence: LOW
+    patterns:
+      - pattern: $NAME = <... random.$F(...) ...>
+      - metavariable-regex:
+          metavariable: $NAME
+          regex: (?i).*(token|secret|password|session|otp|nonce|salt|code).*
+
+  # ------------------------------------------------------------------ logic and quality
+  - id: py-swallowed-exception
+    languages: [python]
+    severity: WARNING
+    message: >-
+      Every error is caught and ignored, so failures disappear silently and leave the program
+      in a half-finished state. Catch the specific exception you expect, and log or re-raise
+      the rest.
+    metadata:
+      title: Exception caught and silently ignored
+      category: logic
+      vibeaudit-severity: medium
+      cwe: "CWE-390: Error Without Action"
+      confidence: HIGH
+    pattern-either:
+      - pattern: |
+          try:
+            ...
+          except:
+            pass
+      - pattern: |
+          try:
+            ...
+          except Exception:
+            pass
+      - pattern: |
+          try:
+            ...
+          except BaseException:
+            pass
+
+  - id: py-mutable-default-argument
+    languages: [python]
+    severity: WARNING
+    message: >-
+      A list, dict or set used as a default argument is created once and shared by every
+      call, so data leaks between calls. Default to None and create it inside the function.
+    metadata:
+      title: Mutable default argument shared between calls
+      category: logic
+      vibeaudit-severity: medium
+      cwe: "CWE-1188: Insecure Default Initialization"
+      confidence: HIGH
+    pattern-either:
+      - pattern: |
+          def $F(..., $A=[], ...):
+            ...
+      - pattern: |
+          def $F(..., $A={}, ...):
+            ...
+      - pattern: |
+          def $F(..., $A=set(), ...):
+            ...
+
+  - id: py-blocking-call-in-async
+    languages: [python]
+    severity: WARNING
+    message: >-
+      A blocking call runs inside an async function, so the whole event loop stalls and every
+      other request waits. Use the async client (httpx.AsyncClient, asyncio.sleep) or
+      run it in a thread with asyncio.to_thread.
+    metadata:
+      title: Blocking call inside async code
+      category: quality
+      vibeaudit-severity: medium
+      cwe: "CWE-400: Uncontrolled Resource Consumption"
+      confidence: HIGH
+    patterns:
+      - pattern-inside: |
+          async def $F(...):
+            ...
+      - pattern-either:
+          - pattern: time.sleep(...)
+          - pattern: requests.$M(...)
+          - pattern: urllib.request.urlopen(...)
+      - pattern-not-inside: asyncio.to_thread(...)
+      - pattern-not-inside: $LOOP.run_in_executor(...)
+
+  - id: py-assert-for-security
+    languages: [python]
+    severity: WARNING
+    message: >-
+      assert is removed when Python runs with -O, so this check disappears in an optimised
+      deployment. Raise an exception or return an error response instead.
+    metadata:
+      title: Security check written as an assert
+      category: logic
+      vibeaudit-severity: medium
+      cwe: "CWE-617: Reachable Assertion"
+      confidence: MEDIUM
+    patterns:
+      - pattern: assert $COND, ...
+      - metavariable-regex:
+          metavariable: $COND
+          regex: (?i).*(admin|auth|role|permission|is_staff|is_superuser|logged_in|owner).*

@@ -1,0 +1,530 @@
+# VibeAudit's own Semgrep rules for JavaScript and TypeScript.
+#
+# Written for this project (not copied from the Semgrep Registry, whose rules may not be
+# offered as a hosted service). Aimed at what AI-written web code gets wrong most often.
+# Every rule has positive and negative cases in tests/javascript.js; run them with:
+#   semgrep --test --config backend/rules backend/rules/tests
+#
+# metadata.vibeaudit-severity (critical|high|medium|low) and metadata.category
+# (security|logic|quality) map straight onto VibeAudit's report.
+
+rules:
+  # ------------------------------------------------------------------ injection
+  - id: js-sql-built-from-strings
+    languages: [javascript, typescript]
+    severity: ERROR
+    message: >-
+      SQL text is built by joining strings or filling in a template literal. If any part comes
+      from a request, an attacker can rewrite the query. Pass values as parameters instead
+      (placeholders such as ? or $1 plus an array of values).
+    metadata:
+      title: SQL query built from strings
+      category: security
+      vibeaudit-severity: critical
+      cwe: "CWE-89: SQL Injection"
+      confidence: MEDIUM
+    patterns:
+      - pattern-either:
+          - pattern: $DB.$METHOD(`...${$X}...`, ...)
+          - pattern: $DB.$METHOD("$SQL" + $X, ...)
+          - pattern: $DB.$METHOD($Y + $X, ...)
+          - pattern: |
+              $Q = `...${$X}...`;
+              ...
+              $DB.$METHOD($Q, ...);
+          - pattern: |
+              $Q = "$SQL" + $X;
+              ...
+              $DB.$METHOD($Q, ...);
+      - metavariable-regex:
+          metavariable: $METHOD
+          regex: ^(query|execute|raw|queryRawUnsafe|executeRawUnsafe|\$queryRawUnsafe|\$executeRawUnsafe)$
+      - pattern-not: $DB.$METHOD("..." + "...", ...)
+
+  - id: js-command-injection
+    mode: taint
+    languages: [javascript, typescript]
+    severity: ERROR
+    message: >-
+      Request data reaches a shell command. A value like "; rm -rf /" runs as its own command.
+      Use execFile/spawn with an argument array (no shell), and allow-list the values.
+    metadata:
+      title: Request data runs in a shell command
+      category: security
+      vibeaudit-severity: critical
+      cwe: "CWE-78: OS Command Injection"
+      confidence: HIGH
+    pattern-sources:
+      - patterns:
+          - pattern-either:
+              - pattern: $REQ.query
+              - pattern: $REQ.body
+              - pattern: $REQ.params
+              - pattern: $REQ.headers
+              - pattern: $REQ.cookies
+          - metavariable-regex:
+              metavariable: $REQ
+              regex: ^(req|request|ctx)$
+    pattern-sinks:
+      - patterns:
+          - pattern-either:
+              - pattern: exec($CMD, ...)
+              - pattern: execSync($CMD, ...)
+              - pattern: $CP.exec($CMD, ...)
+              - pattern: $CP.execSync($CMD, ...)
+          - metavariable-regex:
+              metavariable: $CP
+              regex: ^(child_process|cp|childProcess)$
+          - focus-metavariable: $CMD
+      - patterns:
+          - pattern-either:
+              - pattern: exec($CMD, ...)
+              - pattern: execSync($CMD, ...)
+          - focus-metavariable: $CMD
+
+  - id: js-reflected-xss
+    mode: taint
+    languages: [javascript, typescript]
+    severity: ERROR
+    message: >-
+      Request data is written into an HTML response without escaping. A link containing
+      <script> runs in the visitor's browser. Escape the value, or render it with a template
+      engine that escapes by default.
+    metadata:
+      title: Request data echoed into HTML (XSS)
+      category: security
+      vibeaudit-severity: high
+      cwe: "CWE-79: Cross-site Scripting"
+      confidence: MEDIUM
+    pattern-sources:
+      - patterns:
+          - pattern-either:
+              - pattern: $REQ.query
+              - pattern: $REQ.params
+              - pattern: $REQ.body
+          - metavariable-regex:
+              metavariable: $REQ
+              regex: ^(req|request)$
+    pattern-sinks:
+      - patterns:
+          - pattern-either:
+              - pattern: $RES.send(`...`)
+              - pattern: $RES.send("$S" + $X)
+              - pattern: $RES.send($X + "$S")
+              - pattern: $RES.write(...)
+          - metavariable-regex:
+              metavariable: $RES
+              regex: ^(res|response)$
+    pattern-sanitizers:
+      - pattern: escape(...)
+      - pattern: escapeHtml(...)
+      - pattern: $V.escape(...)
+      - pattern: encodeURIComponent(...)
+      - pattern: parseInt(...)
+      - pattern: Number(...)
+
+  - id: js-dom-xss-sink
+    languages: [javascript, typescript]
+    severity: WARNING
+    message: >-
+      A non-constant value is written as HTML. If it can contain user input, it can inject
+      script. Use textContent, or sanitize with a library such as DOMPurify.
+    metadata:
+      title: Dynamic value written as HTML
+      category: security
+      vibeaudit-severity: medium
+      cwe: "CWE-79: Cross-site Scripting"
+      confidence: LOW
+    pattern-either:
+      - patterns:
+          - pattern: $EL.innerHTML = $X
+          - pattern-not: $EL.innerHTML = "..."
+          - pattern-not: $EL.innerHTML = ``
+      - patterns:
+          - pattern: $EL.outerHTML = $X
+          - pattern-not: $EL.outerHTML = "..."
+      - pattern: document.write($X)
+      - pattern: '<$TAG dangerouslySetInnerHTML={{__html: $X}} />'
+
+  - id: js-code-eval
+    languages: [javascript, typescript]
+    severity: ERROR
+    message: >-
+      A non-constant string is run as code. If it can carry user input, an attacker runs
+      arbitrary JavaScript on the server or in the page. Parse data with JSON.parse instead.
+    metadata:
+      title: Dynamic code passed to eval
+      category: security
+      vibeaudit-severity: high
+      cwe: "CWE-95: Eval Injection"
+      confidence: MEDIUM
+    pattern-either:
+      - patterns:
+          - pattern: eval($X)
+          - pattern-not: eval("...")
+      - patterns:
+          - pattern: new Function(..., $X)
+          - pattern-not: new Function(..., "...")
+      - patterns:
+          - pattern-either:
+              - pattern: setTimeout($X, ...)
+              - pattern: setInterval($X, ...)
+          - pattern-not: setTimeout("...", ...)
+          - metavariable-pattern:
+              metavariable: $X
+              patterns:
+                - pattern-either:
+                    - pattern: "\"$S\" + $Y"
+                    - pattern: "`...${$Y}...`"
+
+  - id: js-path-traversal
+    mode: taint
+    languages: [javascript, typescript]
+    severity: ERROR
+    message: >-
+      Request data is used as a file path. "../../etc/passwd" walks out of the intended
+      folder. Resolve the path and check it stays inside an allowed base directory, or map
+      ids to files server-side.
+    metadata:
+      title: Request data used as a file path
+      category: security
+      vibeaudit-severity: high
+      cwe: "CWE-22: Path Traversal"
+      confidence: MEDIUM
+    pattern-sources:
+      - patterns:
+          - pattern-either:
+              - pattern: $REQ.query
+              - pattern: $REQ.params
+              - pattern: $REQ.body
+          - metavariable-regex:
+              metavariable: $REQ
+              regex: ^(req|request)$
+    pattern-sinks:
+      - patterns:
+          - pattern-either:
+              - pattern: $RES.sendFile($P, ...)
+              - pattern: $RES.download($P, ...)
+              - pattern: fs.$F($P, ...)
+              - pattern: $FS.promises.$F($P, ...)
+          - focus-metavariable: $P
+    pattern-sanitizers:
+      - pattern: path.basename(...)
+
+  - id: js-open-redirect
+    mode: taint
+    languages: [javascript, typescript]
+    severity: WARNING
+    message: >-
+      The redirect target comes from the request, so a link to your site can bounce visitors
+      to a phishing page. Only redirect to relative paths or an allow-list of hosts.
+    metadata:
+      title: Redirect target taken from the request
+      category: security
+      vibeaudit-severity: medium
+      cwe: "CWE-601: Open Redirect"
+      confidence: MEDIUM
+    pattern-sources:
+      - patterns:
+          - pattern-either:
+              - pattern: $REQ.query
+              - pattern: $REQ.body
+              - pattern: $REQ.params
+          - metavariable-regex:
+              metavariable: $REQ
+              regex: ^(req|request)$
+    pattern-sinks:
+      - patterns:
+          - pattern: $RES.redirect(..., $URL)
+          - focus-metavariable: $URL
+
+  - id: js-ssrf
+    mode: taint
+    languages: [javascript, typescript]
+    severity: WARNING
+    message: >-
+      The server fetches a URL taken from the request. Attackers can point it at internal
+      services or cloud metadata (169.254.169.254). Allow-list the hosts you call.
+    metadata:
+      title: Server fetches a URL from the request (SSRF)
+      category: security
+      vibeaudit-severity: high
+      cwe: "CWE-918: Server-Side Request Forgery"
+      confidence: MEDIUM
+    pattern-sources:
+      - patterns:
+          - pattern-either:
+              - pattern: $REQ.query
+              - pattern: $REQ.body
+              - pattern: $REQ.params
+          - metavariable-regex:
+              metavariable: $REQ
+              regex: ^(req|request)$
+    pattern-sinks:
+      - patterns:
+          - pattern-either:
+              - pattern: fetch($U, ...)
+              - pattern: axios($U, ...)
+              - pattern: axios.$M($U, ...)
+              - pattern: got($U, ...)
+              - pattern: http.get($U, ...)
+              - pattern: https.get($U, ...)
+          - focus-metavariable: $U
+
+  - id: js-nosql-injection
+    mode: taint
+    languages: [javascript, typescript]
+    severity: WARNING
+    message: >-
+      A request value goes straight into a MongoDB query. A JSON body like
+      {"password": {"$ne": null}} matches any user. Cast values to strings or validate the
+      body's shape before querying.
+    metadata:
+      title: Request body used directly in a MongoDB query
+      category: security
+      vibeaudit-severity: high
+      cwe: "CWE-943: NoSQL Injection"
+      confidence: LOW
+    pattern-sources:
+      - patterns:
+          - pattern-either:
+              - pattern: $REQ.body
+              - pattern: $REQ.query
+          - metavariable-regex:
+              metavariable: $REQ
+              regex: ^(req|request)$
+    pattern-sinks:
+      - patterns:
+          - pattern: $MODEL.$F($Q, ...)
+          - metavariable-regex:
+              metavariable: $F
+              regex: ^(find|findOne|findOneAndUpdate|findOneAndDelete|updateOne|updateMany|deleteOne|deleteMany|countDocuments)$
+          - focus-metavariable: $Q
+    pattern-sanitizers:
+      - pattern: String(...)
+      - pattern: $X.toString()
+      - pattern: mongoSanitize(...)
+
+  # ------------------------------------------------------------------ auth and secrets
+  - id: js-jwt-decode-without-verify
+    languages: [javascript, typescript]
+    severity: ERROR
+    message: >-
+      jwt.decode() reads a token without checking its signature, so anyone can forge one
+      (for example with role "admin"). Use jwt.verify() with your secret and an explicit
+      algorithm list.
+    metadata:
+      title: JWT decoded without verifying the signature
+      category: security
+      vibeaudit-severity: critical
+      cwe: "CWE-347: Improper Verification of Cryptographic Signature"
+      confidence: HIGH
+    pattern: $JWT.decode(...)
+    paths:
+      exclude: ["*.d.ts"]
+
+  - id: js-jwt-hardcoded-secret
+    languages: [javascript, typescript]
+    severity: ERROR
+    message: >-
+      The JWT signing secret is written into the code. Anyone with the source can mint valid
+      tokens. Load it from an environment variable or a secret manager.
+    metadata:
+      title: JWT signed with a hard-coded secret
+      category: security
+      vibeaudit-severity: high
+      cwe: "CWE-798: Hard-coded Credentials"
+      confidence: HIGH
+    pattern-either:
+      - pattern: $JWT.sign($P, "...", ...)
+      - pattern: $JWT.verify($T, "...", ...)
+      - pattern: |
+          const $K = "...";
+          ...
+          $JWT.sign($P, $K, ...);
+
+  - id: js-hardcoded-db-password
+    languages: [javascript, typescript]
+    severity: ERROR
+    message: >-
+      A database password is written into the code. Read it from an environment variable and
+      rotate the exposed one.
+    metadata:
+      title: Database password in source code
+      category: security
+      vibeaudit-severity: high
+      cwe: "CWE-798: Hard-coded Credentials"
+      confidence: HIGH
+    patterns:
+      - pattern-either:
+          - pattern: '$M.$CREATE({..., password: "$PW", ...})'
+          - pattern: 'new $CLIENT({..., password: "$PW", ...})'
+      - metavariable-regex:
+          metavariable: $PW
+          regex: ^.{3,}$
+
+  - id: js-hardcoded-credential
+    languages: [javascript, typescript]
+    severity: WARNING
+    message: >-
+      A variable named like a password, secret or token holds a literal value. Move it to an
+      environment variable or a secret manager.
+    metadata:
+      title: Credential-like value hard-coded
+      category: security
+      vibeaudit-severity: medium
+      cwe: "CWE-798: Hard-coded Credentials"
+      confidence: MEDIUM
+    patterns:
+      - pattern-either:
+          - pattern: const $NAME = "$VAL"
+          - pattern: let $NAME = "$VAL"
+          - pattern: var $NAME = "$VAL"
+      - metavariable-regex:
+          metavariable: $NAME
+          regex: (?i)^.*(password|passwd|secret|api_?key|access_?token|auth_?token|private_?key)$
+      - metavariable-regex:
+          metavariable: $VAL
+          regex: ^(?!(?i:changeme|placeholder|your[-_ ]|xxx|<|\$\{)).{6,}$
+
+  - id: js-tls-verification-disabled
+    languages: [javascript, typescript]
+    severity: ERROR
+    message: >-
+      TLS certificate checks are switched off, so a network attacker can read and change the
+      traffic. Remove the override and fix the certificate instead.
+    metadata:
+      title: TLS certificate verification disabled
+      category: security
+      vibeaudit-severity: high
+      cwe: "CWE-295: Improper Certificate Validation"
+      confidence: HIGH
+    pattern-either:
+      - pattern: "{..., rejectUnauthorized: false, ...}"
+      - pattern: process.env.NODE_TLS_REJECT_UNAUTHORIZED = "0"
+
+  - id: js-cors-any-origin
+    languages: [javascript, typescript]
+    severity: WARNING
+    message: >-
+      CORS allows every origin. Combined with cookies or tokens in the browser, any site can
+      read your API's responses. List the origins that should have access.
+    metadata:
+      title: CORS allows any origin
+      category: security
+      vibeaudit-severity: medium
+      cwe: "CWE-942: Permissive Cross-domain Policy"
+      confidence: MEDIUM
+    pattern-either:
+      - pattern: 'cors({..., origin: "*", ...})'
+      - pattern: 'cors({..., origin: true, ...})'
+      - pattern: $RES.setHeader("Access-Control-Allow-Origin", "*")
+      - pattern: $RES.header("Access-Control-Allow-Origin", "*")
+      - pattern: $RES.set("Access-Control-Allow-Origin", "*")
+
+  - id: js-weak-random-token
+    languages: [javascript, typescript]
+    severity: WARNING
+    message: >-
+      Math.random() is predictable, so a token, id or password built from it can be guessed.
+      Use crypto.randomUUID() or crypto.randomBytes().
+    metadata:
+      title: Math.random() used for a token
+      category: security
+      vibeaudit-severity: medium
+      cwe: "CWE-338: Weak PRNG"
+      confidence: LOW
+    patterns:
+      - pattern-either:
+          - pattern: const $NAME = <... Math.random() ...>
+          - pattern: let $NAME = <... Math.random() ...>
+          - pattern: $OBJ.$NAME = <... Math.random() ...>
+      - metavariable-regex:
+          metavariable: $NAME
+          regex: (?i).*(token|secret|password|session|otp|nonce|salt|key|code).*
+
+  - id: js-weak-password-hash
+    languages: [javascript, typescript]
+    severity: ERROR
+    message: >-
+      Passwords hashed with a fast hash (MD5/SHA-1/SHA-256) can be cracked quickly after a
+      leak. Use bcrypt, scrypt or argon2.
+    metadata:
+      title: Password hashed with a fast hash
+      category: security
+      vibeaudit-severity: high
+      cwe: "CWE-916: Weak Password Hash"
+      confidence: MEDIUM
+    patterns:
+      - pattern: $CRYPTO.createHash($ALG).update($PW)
+      - metavariable-regex:
+          metavariable: $ALG
+          regex: (?i)^.(md5|sha1|sha256).$
+      - metavariable-regex:
+          metavariable: $PW
+          regex: (?i).*pass.*
+
+  # ------------------------------------------------------------------ logic
+  - id: js-async-foreach
+    languages: [javascript, typescript]
+    severity: WARNING
+    message: >-
+      forEach does not wait for async callbacks. The code after it runs before any of them
+      finish, and their errors go unhandled. Use for...of with await, or await
+      Promise.all(items.map(...)).
+    metadata:
+      title: async callback inside forEach is never awaited
+      category: logic
+      vibeaudit-severity: high
+      cwe: "CWE-362: Race Condition"
+      confidence: HIGH
+    pattern-either:
+      - pattern: $ARR.forEach(async ($...ARGS) => { ... })
+      - pattern: $ARR.forEach(async function ($...ARGS) { ... })
+
+  - id: js-loose-equality-auth
+    languages: [javascript, typescript]
+    severity: WARNING
+    message: >-
+      A security check compares a request value with a fixed string using ==. Hard-coded
+      codes like this end up shared. Look the value up server-side and compare with ===.
+    metadata:
+      title: Hard-coded code accepted from the request
+      category: logic
+      vibeaudit-severity: high
+      cwe: "CWE-798: Hard-coded Credentials"
+      confidence: MEDIUM
+    patterns:
+      - pattern-either:
+          - pattern: if ($REQ.$PART.$FIELD == "$CODE") $STMT
+          - pattern: if ($REQ.$PART.$FIELD === "$CODE") $STMT
+      - metavariable-regex:
+          metavariable: $REQ
+          regex: ^(req|request)$
+      - metavariable-regex:
+          metavariable: $FIELD
+          regex: (?i).*(coupon|promo|code|token|key|password|secret|admin).*
+
+  - id: js-unchecked-query-result
+    languages: [javascript, typescript]
+    severity: WARNING
+    message: >-
+      The callback reads rows[0] (or rows.length) without checking err first. When the query
+      fails rows is undefined and the server crashes. Handle err before touching the result.
+    metadata:
+      title: Query result used without checking the error
+      category: logic
+      vibeaudit-severity: medium
+      cwe: "CWE-252: Unchecked Return Value"
+      confidence: MEDIUM
+    patterns:
+      - pattern-either:
+          - pattern-inside: $DB.query(..., ($ERR, $ROWS) => { ... })
+          - pattern-inside: $DB.query(..., function ($ERR, $ROWS) { ... })
+      - pattern-not-inside: |
+          if (<... $ERR ...>) $S
+          ...
+      - pattern-not-inside: if (<... $ERR ...>) $S
+      - pattern-either:
+          - pattern: $ROWS[0]
+          - pattern: $ROWS.length

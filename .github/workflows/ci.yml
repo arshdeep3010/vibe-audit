@@ -23,9 +23,21 @@ jobs:
           cache: pip
           cache-dependency-path: backend/requirements*.txt
       - run: pip install -r backend/requirements-dev.txt
+      # Semgrep in its own environment (its pinned dependencies would clash with the app's).
+      # With it on PATH, the rule-pack test runs real Semgrep on the sample.
+      - run: pipx install semgrep==1.185.0
       # Fake model + mocked AWS (moto): no API key, no AWS account, no network calls.
       - run: python -m pytest -q
         working-directory: backend
+
+  rules:
+    name: semgrep rule tests
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v5
+      - run: pipx install semgrep==1.185.0
+      # Every rule in backend/rules has "ruleid:" and "ok:" cases in backend/rules/tests.
+      - run: semgrep --test --metrics off --config backend/rules backend/rules/tests
 
   terraform:
     name: terraform fmt + validate

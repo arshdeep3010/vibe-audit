@@ -88,6 +88,46 @@ resource "aws_s3_bucket_policy" "state" {
   depends_on = [aws_s3_bucket_public_access_block.state]
 }
 
+# ---------------------------------------------------------------- worker image registry
+
+# The worker Lambda runs from a container image (Semgrep is too big for a zip Lambda). The
+# repository lives here, not in the app stack, so the pipeline can push an image before the
+# app stack's first apply needs it.
+resource "aws_ecr_repository" "worker" {
+  name                 = "${var.name}-worker"
+  image_tag_mutability = "IMMUTABLE"
+  force_delete         = true
+  image_scanning_configuration { scan_on_push = true }
+}
+
+# Keep the last 3 images: enough to roll back, small enough to stay near ECR's free tier.
+resource "aws_ecr_lifecycle_policy" "worker" {
+  repository = aws_ecr_repository.worker.name
+  policy = jsonencode({
+    rules = [{
+      rulePriority = 1
+      description  = "keep the last 3 images"
+      selection    = { tagStatus = "any", countType = "imageCountMoreThan", countNumber = 3 }
+      action       = { type = "expire" }
+    }]
+  })
+}
+
+# Lambda pulls the image with its own service principal, limited to this project's functions.
+resource "aws_ecr_repository_policy" "worker" {
+  repository = aws_ecr_repository.worker.name
+  policy = jsonencode({
+    Version = "2012-10-17"
+    Statement = [{
+      Sid       = "LambdaPull"
+      Effect    = "Allow"
+      Principal = { Service = "lambda.amazonaws.com" }
+      Action    = ["ecr:BatchGetImage", "ecr:GetDownloadUrlForLayer"]
+      Condition = { StringLike = { "aws:sourceArn" = "arn:aws:lambda:${var.region}:${local.account}:function:${var.name}-*" } }
+    }]
+  })
+}
+
 # ---------------------------------------------------------------- GitHub OIDC
 
 # An account can hold only one provider per URL. If another stack already made it, reuse it.
@@ -154,6 +194,22 @@ resource "aws_iam_role_policy" "deploy" {
         Effect   = "Allow"
         Action   = ["lambda:*"]
         Resource = ["arn:aws:lambda:${var.region}:${local.account}:function:${var.name}-*"]
+      },
+      {
+        Sid      = "EcrLogin"
+        Effect   = "Allow"
+        Action   = ["ecr:GetAuthorizationToken"]
+        Resource = "*"
+      },
+      {
+        Sid    = "WorkerImage" # push images; Lambda's create/update calls also need the pull actions
+        Effect = "Allow"
+        Action = [
+          "ecr:BatchCheckLayerAvailability", "ecr:InitiateLayerUpload", "ecr:UploadLayerPart",
+          "ecr:CompleteLayerUpload", "ecr:PutImage", "ecr:BatchGetImage", "ecr:GetDownloadUrlForLayer",
+          "ecr:DescribeImages", "ecr:DescribeRepositories", "ecr:GetRepositoryPolicy",
+        ]
+        Resource = aws_ecr_repository.worker.arn
       },
       {
         Sid      = "Table"

@@ -33,9 +33,12 @@ async def run_static_analysis(
     hotspots: set[str] | None = None,
     stats: AnalysisStats | None = None,
     skip_triage: bool = False,
+    hints: list[Finding] | None = None,
 ) -> tuple[list[Finding], Triage]:
     """`skip_triage`: for a single pasted snippet, a separate triage call adds little; the
-    audit call returns the code's profile (app type, frameworks) instead. Saves one LLM call."""
+    audit call returns the code's profile (app type, frameworks) instead. Saves one LLM call.
+    `hints`: scanner findings (semgrep, bandit, secret scan); each segment's prompt lists the ones
+    inside it so the model looks hard at those lines and reports what is real."""
     stats = stats if stats is not None else AnalysisStats()
     triage = Triage() if skip_triage else await _triage(repo, llm, progress)
     want_profile = skip_triage
@@ -58,7 +61,8 @@ async def run_static_analysis(
 
     sem = asyncio.Semaphore(settings.max_concurrency)
     tasks = [
-        asyncio.create_task(_analyze_unit(llm, sf, start, end, seg, is_chunk, triage, sem, want_profile))
+        asyncio.create_task(_analyze_unit(llm, sf, start, end, seg, is_chunk, triage, sem, want_profile,
+                                          _hints_for(hints or [], sf.rel, start, end)))
         for (sf, start, end, seg, is_chunk) in units
     ]
 
@@ -149,14 +153,24 @@ async def _analyze_unit(
     triage: Triage,
     sem: asyncio.Semaphore,
     want_profile: bool = False,
+    hints: list[str] | None = None,
 ) -> tuple[list[Finding], bool, dict | None]:
     numbered = number_lines(seg, start=start)
-    msgs = build_analysis_messages(numbered, sf.rel, start, end, is_chunk, triage, want_profile)
+    msgs = build_analysis_messages(numbered, sf.rel, start, end, is_chunk, triage, want_profile, hints)
     async with sem:
         data = await llm.complete_json(msgs, max_tokens=settings.max_tokens)
     truncated = isinstance(data, dict) and bool(data.get("_truncated"))
     profile = data.get("profile") if isinstance(data, dict) else None
     return _to_findings(data, sf), truncated, profile if isinstance(profile, dict) else None
+
+
+def _hints_for(findings: list[Finding], path: str, start: int, end: int, cap: int = 25) -> list[str]:
+    out = []
+    for f in findings:
+        if f.file == path and f.line_start and start <= f.line_start <= end:
+            rule = f" {f.rule_id}" if f.rule_id else ""
+            out.append(f"line {f.line_start}: {f.source.value}{rule} — {f.title}")
+    return out[:cap]
 
 
 def _to_findings(data, sf: SourceFile) -> list[Finding]:

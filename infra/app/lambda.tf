@@ -1,6 +1,8 @@
-# Two functions from one package:
+# Two functions:
 #   api    - FastAPI behind a function URL that only CloudFront can call (IAM auth + OAC).
-#   worker - runs one audit; the API invokes it asynchronously.
+#            A small zip package (build/lambda.zip).
+#   worker - runs one audit; the API invokes it asynchronously. A container image from ECR,
+#            because it carries Semgrep (~290 MB, over the 250 MB limit for zip packages).
 
 locals {
   functions = {
@@ -89,16 +91,19 @@ resource "aws_cloudwatch_log_group" "fn" {
 }
 
 resource "aws_lambda_function" "fn" {
-  for_each         = local.functions
-  function_name    = each.value.name
-  role             = aws_iam_role.fn[each.key].arn
-  handler          = each.value.handler
-  runtime          = "python3.12"
-  architectures    = [var.lambda_arch]
-  filename         = var.lambda_zip
-  source_code_hash = filebase64sha256(var.lambda_zip)
-  memory_size      = each.value.memory
-  timeout          = each.value.timeout
+  for_each      = local.functions
+  function_name = each.value.name
+  role          = aws_iam_role.fn[each.key].arn
+  architectures = [var.lambda_arch]
+  memory_size   = each.value.memory
+  timeout       = each.value.timeout
+
+  package_type     = each.key == "worker" ? "Image" : "Zip"
+  image_uri        = each.key == "worker" ? var.worker_image_uri : null
+  handler          = each.key == "worker" ? null : each.value.handler
+  runtime          = each.key == "worker" ? null : "python3.12"
+  filename         = each.key == "worker" ? null : var.lambda_zip
+  source_code_hash = each.key == "worker" ? null : filebase64sha256(var.lambda_zip)
 
   reserved_concurrent_executions = each.key == "worker" ? var.worker_reserved_concurrency : -1
 
