@@ -1151,7 +1151,7 @@
             <ul class="plist">
               <li>The code is written to a temporary folder for the scan and <b>deleted when it ends</b>. Only the report is saved.</li>
               <li><b>It is sent to the model provider</b> (<span class="mono" style="font-size:12px" x-text="shortModel || 'the configured model'"></span>) for analysis. Don't paste real secrets.</li>
-              <li>Secrets found in your code are <b>masked in the report</b>, for example <span class="mono" style="font-size:12px">sk_l***tUs3</span>.</li>
+              <li>Secrets found in your code are <b>masked in the report</b>, for example <span class="mono" style="font-size:12px">sk_l***0000</span>.</li>
               <li>Each report has a long random ID, so <b>only people with the link</b> can open it.</li>
               <li x-show="isPublic">Reports are <b>deleted after 24 hours</b>. Your history is kept only in this browser.</li>
               <li x-show="!isPublic">Reports are kept in a local SQLite file, <span class="mono" style="font-size:12px">data/vibeaudit.db</span>.</li>

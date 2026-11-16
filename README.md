@@ -4,8 +4,15 @@
 or a public GitHub repo, and get a ranked, explained report of real bugs across
 **security**, **logic/runtime** and **correctness/quality**, with live progress in the browser.
 
-Built with FastAPI, an OpenAI-compatible LLM (NVIDIA Nemotron by default), Alpine.js and Three.js.
-Hosted on AWS (Lambda + DynamoDB + S3 + CloudFront) with Terraform, deployed by GitHub Actions.
+**Live demo:** https://d2vy8g526grxgy.cloudfront.net (snippets only; [what it runs and why](#semgrep-judged-by-the-model))
+
+Scanners first (a secret scan, bandit, and Semgrep with [42 rules written for this project](backend/rules)),
+then an LLM audit, then a verification pass where the model judges every scanner hit and its own serious
+findings, so false alarms are dropped with a reason. Still 2 model calls per snippet.
+
+Built with FastAPI, an OpenAI-compatible LLM (NVIDIA Nemotron by default), Semgrep, Alpine.js and Three.js.
+Hosted on AWS (Lambda + DynamoDB + S3 + CloudFront, worker as a container image in ECR) with Terraform,
+deployed by GitHub Actions.
 
 ## Two modes
 
@@ -93,8 +100,9 @@ Other cost controls:
 ### Privacy & security
 
 - Pasted code is written to a temp folder for the scan and deleted afterwards. Only the report
-  is stored, and secrets in it are masked (`sk_l***tUs3`).
-- **Pasted code is sent to the model provider.** Don't paste real secrets.
+  is stored, and secrets in it are masked (`sk_l***0000`).
+- **Pasted code is sent to the model provider.** Don't paste real secrets. Semgrep and bandit run on the
+  server itself; nothing goes to Semgrep (metrics and version checks are off, and the demo uses no token).
 - Report IDs are random UUID4s (122 random bits), so a report can only be opened by someone who has its link.
 - Security headers on every response (CSP, `X-Frame-Options: DENY`, `nosniff`, no referrer).
   CDN scripts are pinned with Subresource Integrity.
@@ -118,9 +126,6 @@ python -m venv .venv-semgrep
 .\.venv-semgrep\Scripts\pip install semgrep
 .\.venv-semgrep\Scripts\semgrep install-semgrep-pro   # optional, after setting the token
 ```
-
-> 🔐 **Rotate your API key.** The key that was in `.env` earlier was pasted into a chat and
-> should be treated as leaked. Create a new one and put it in `.env` (git-ignored).
 
 ## Run
 
@@ -212,7 +217,7 @@ backend/Dockerfile  the worker image: app + Semgrep
 Needs the AWS CLI signed in with admin rights, Terraform ≥ 1.10 (`winget install Hashicorp.Terraform`),
 the project's `.venv` and Docker Desktop (for the worker image).
 
-1. Store the model key. Use a **new** key, since the old one leaked:
+1. Store the model key in SSM (it never goes into Terraform, GitHub or the repo):
    ```powershell
    aws ssm put-parameter --name /vibeaudit/llm-api-key --type SecureString --value <your-new-key>
    ```
@@ -300,6 +305,9 @@ vibe-audit/
 - A custom domain (ACM certificate + Route 53). The site uses the `*.cloudfront.net` address.
 - In `RUNTIME=server` mode, limits and jobs live in memory, so run a single process. The Lambda
   runtime keeps them in DynamoDB instead.
+- A faster cold start for the worker: the image is about 1.3 GB, and the first scan after the site has
+  been idle takes about 40 s to start.
+- A larger seeded-bug benchmark, so detection is measured across many samples instead of one.
 
 LLM-assisted analysis can be wrong, and the number of findings varies between runs. Verify
 findings before acting on them.
